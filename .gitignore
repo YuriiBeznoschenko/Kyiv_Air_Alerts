@@ -1,4 +1,5 @@
 .env
+node_modules/
 .netlify/
 .sites-runtime/
 v6-source/

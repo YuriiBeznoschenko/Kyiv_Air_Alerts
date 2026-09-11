@@ -1,5 +1,14 @@
+import { createPhaseStateStore } from './lib/blob-phase-store.mjs';
+import {
+  advanceCollectorState,
+  buildCollectorPayload,
+  normalizeCollectorState,
+  recordCollectorFailure,
+} from './lib/phase-collector-v1.mjs';
+
 const CACHE_TTL_MS = 45_000;
-const DEFAULT_TIMEOUT_MS = 9_000;
+const COLLECTION_INTERVAL_MS = 45_000;
+const DEFAULT_TIMEOUT_MS = 7_000;
 const KYIV_NAMES = new Set(['м київ', 'місто київ', 'kyiv', 'kyiv city', 'city of kyiv']);
 
 let memoryCache = { expiresAt: 0, payload: null };
@@ -18,73 +27,170 @@ export default async function handler(request) {
     return json({ ...memoryCache.payload, cache: 'memory' }, 200, true);
   }
 
-  const token = process.env.ALERTS_API_TOKEN
-    || process.env.ALERTS_IN_UA_TOKEN
-    || process.env.UKRAINE_ALARM_API_TOKEN;
-
-  if (!token) {
+  if (!buildProviderCandidates(process.env).length) {
     return json({
       ok: false,
       configured: false,
-      error: 'Missing ALERTS_API_TOKEN environment variable',
+      error: 'Missing alert-provider token environment variable',
       generatedAt: new Date().toISOString(),
     }, 503);
   }
 
-  const requestedProvider = String(process.env.ALERTS_PROVIDER || 'ukraine-alarm-v3').toLowerCase();
-  const candidates = requestedProvider === 'auto'
-    ? ['alerts-in-ua', 'ukraine-alarm-v3']
-    : [requestedProvider];
-  const failures = [];
-
-  for (const provider of candidates) {
-    try {
-      const payload = provider === 'alerts-in-ua'
-        ? await fetchAlertsInUa(token)
-        : provider === 'ukraine-alarm-v3'
-          ? await fetchUkraineAlarmV3(token)
-          : null;
-
-      if (!payload) throw new Error(`Unsupported provider: ${provider}`);
-      const response = {
-        ok: true,
-        configured: true,
-        generatedAt: new Date().toISOString(),
-        cache: 'origin',
-        ...payload,
-      };
-      memoryCache = { expiresAt: Date.now() + CACHE_TTL_MS, payload: response };
-      return json(response, 200, !force);
-    } catch (error) {
-      failures.push(`${provider}: ${safeError(error)}`);
-    }
+  const store = createPhaseStateStore(process.env, {
+    deployScoped: isDeployScopedRequest(request, process.env),
+  });
+  const nowMs = Date.now();
+  let stored;
+  try {
+    stored = await store.read();
+  } catch (error) {
+    return json({
+      ok: false,
+      configured: true,
+      error: 'Persistent phase history is unavailable',
+      details: [safeError(error)],
+      generatedAt: new Date(nowMs).toISOString(),
+    }, 503);
   }
 
-  return json({
-    ok: false,
-    configured: true,
-    error: 'All configured alert providers failed',
-    details: failures,
-    generatedAt: new Date().toISOString(),
-  }, 502);
+  const state = normalizeCollectorState(stored.data);
+  const shouldCollect = force
+    || !Number.isFinite(state.lastAttemptAtMs)
+    || nowMs - state.lastAttemptAtMs >= COLLECTION_INTERVAL_MS;
+  let result;
+  try {
+    result = shouldCollect
+      ? await collectAndPersist({ store, env: process.env })
+      : { success: true, state };
+  } catch (error) {
+    return json({
+      ok: false,
+      configured: true,
+      error: 'Persistent phase collection failed',
+      details: [safeError(error)],
+      generatedAt: new Date(nowMs).toISOString(),
+    }, 503);
+  }
+  const responseNowMs = Date.now();
+  const response = buildCollectorPayload(result.state, { nowMs: responseNowMs });
+
+  if (!response.ok) {
+    return json({
+      ...response,
+      error: 'All configured alert providers failed',
+      details: result.failures || (result.error ? [safeError(result.error)] : []),
+    }, 502);
+  }
+
+  memoryCache = { expiresAt: responseNowMs + CACHE_TTL_MS, payload: response };
+  return json(response, 200, !force);
 }
 
 export const config = { path: '/api/air-alerts' };
 
-async function fetchAlertsInUa(token) {
-  const base = trimSlash(process.env.ALERTS_IN_UA_BASE || 'https://api.alerts.in.ua/v1');
-  const regionUid = String(process.env.ALERTS_IN_UA_REGION_UID || '31');
+export function isDeployScopedRequest(request, env = process.env) {
+  const siteName = String(env.SITE_NAME || '').trim().toLowerCase();
+  if (!siteName) return false;
+  try {
+    const hostname = new URL(request.url).hostname.toLowerCase();
+    return hostname.endsWith(`--${siteName}.netlify.app`);
+  } catch {
+    return false;
+  }
+}
+
+export async function collectAndPersist(options = {}) {
+  const env = options.env || process.env;
+  const explicitNowMs = Number.isFinite(options.nowMs) ? options.nowMs : null;
+  // Scheduled functions have no preview request, so their default is the
+  // site-wide store. HTTP deploy previews pass an isolated store explicitly.
+  const store = options.store || createPhaseStateStore(env);
+  const current = normalizeCollectorState((await store.read()).data);
+
+  try {
+    const result = await fetchConfiguredProvider({
+      env,
+      fetchImpl: options.fetchImpl || fetch,
+      preferredProvider: current.providerKey,
+    });
+    const snapshot = {
+      ...result.payload,
+      warnings: [
+        ...(result.payload.warnings || []),
+        ...result.failures.map(failure => `Provider fallback: ${failure}`),
+      ],
+    };
+    const observedAtMs = explicitNowMs ?? Date.now();
+    const state = await store.update(previous => advanceCollectorState(previous, snapshot, {
+      nowMs: observedAtMs,
+      providerKey: result.providerKey,
+    }));
+    return { success: true, state, failures: result.failures };
+  } catch (error) {
+    const failedAtMs = explicitNowMs ?? Date.now();
+    const state = await store.update(previous => recordCollectorFailure(previous, error, { nowMs: failedAtMs }));
+    return { success: false, state, error, failures: error.failures || [] };
+  }
+}
+
+export function buildProviderCandidates(env = process.env, preferredProvider = '') {
+  const genericToken = String(env.ALERTS_API_TOKEN || '').trim();
+  const explicitAlertsToken = String(env.ALERTS_IN_UA_TOKEN || '').trim();
+  const tokens = {
+    'alerts-in-ua': explicitAlertsToken || genericToken,
+    'ukraine-alarm-v3': String(env.UKRAINE_ALARM_API_TOKEN || genericToken).trim(),
+  };
+  const requested = String(env.ALERTS_PROVIDER || 'auto').trim().toLowerCase();
+  const requestedOrder = requested === 'auto'
+    ? ['alerts-in-ua', 'ukraine-alarm-v3']
+    : [requested];
+  const order = [
+    ...(explicitAlertsToken ? ['alerts-in-ua'] : []),
+    preferredProvider,
+    ...requestedOrder,
+    'alerts-in-ua',
+    'ukraine-alarm-v3',
+  ];
+  const seen = new Set();
+  return order.flatMap(provider => {
+    if (!tokens[provider] || seen.has(provider)) return [];
+    seen.add(provider);
+    return [{ provider, token: tokens[provider] }];
+  });
+}
+
+export async function fetchConfiguredProvider(options = {}) {
+  const env = options.env || process.env;
+  const fetchImpl = options.fetchImpl || fetch;
+  const candidates = buildProviderCandidates(env, options.preferredProvider);
+  if (!candidates.length) throw new Error('No supported alert-provider token is configured');
+  const failures = [];
+
+  for (const candidate of candidates) {
+    try {
+      const payload = candidate.provider === 'alerts-in-ua'
+        ? await fetchAlertsInUa(candidate.token, env, fetchImpl)
+        : await fetchUkraineAlarmV3(candidate.token, env, fetchImpl);
+      return { payload, providerKey: candidate.provider, failures };
+    } catch (error) {
+      failures.push(`${candidate.provider}: ${safeError(error)}`);
+    }
+  }
+
+  const error = new Error(`All configured alert providers failed · ${failures.join(' · ')}`);
+  error.failures = failures;
+  throw error;
+}
+
+async function fetchAlertsInUa(token, env, fetchImpl) {
+  const base = trimSlash(env.ALERTS_IN_UA_BASE || 'https://api.alerts.in.ua/v1');
+  const regionUid = String(env.ALERTS_IN_UA_REGION_UID || '31');
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
 
-  const [historyPayload, activePayload] = await Promise.all([
-    fetchJson(`${base}/regions/${encodeURIComponent(regionUid)}/alerts/month_ago.json`, headers),
-    fetchJson(`${base}/alerts/active.json`, headers),
-  ]);
-
-  const historyItems = arrayFrom(historyPayload, ['alerts', 'data', 'items'])
-    .filter(item => isKyivItem(item, regionUid))
-    .map(normalizeAlert)
-    .filter(Boolean);
+  // Kyiv Digital remains the source of completed intervals. The collector only
+  // needs the live snapshot here, which avoids consuming the provider's
+  // rate-limited history endpoint once per minute.
+  const activePayload = await fetchJson(`${base}/alerts/active.json`, headers, fetchImpl);
   const activeItems = arrayFrom(activePayload, ['alerts', 'data', 'items'])
     .filter(item => isKyivItem(item, regionUid))
     .map(normalizeAlert)
@@ -92,29 +198,28 @@ async function fetchAlertsInUa(token) {
     .filter(item => item.ongoing);
 
   const active = activeItems.sort((a, b) => Date.parse(b.start) - Date.parse(a.start))[0] || null;
-  const alerts = dedupeAlerts([...historyItems, ...activeItems]);
-  if (!alerts.length && !active) throw new Error('No Kyiv alert records returned');
+  const alerts = dedupeAlerts(activeItems);
 
   return {
     provider: 'alerts.in.ua',
     providerUrl: 'https://alerts.in.ua/',
     region: { id: regionUid, name: 'Kyiv City' },
-    classificationAvailable: alerts.some(hasClassification) || Boolean(active && hasClassification(active)),
+    classificationAvailable: true,
     alerts,
     active,
     warnings: [],
   };
 }
 
-async function fetchUkraineAlarmV3(token) {
-  const base = trimSlash(process.env.UKRAINE_ALARM_API_BASE || 'https://api.ukrainealarm.com');
+async function fetchUkraineAlarmV3(token, env, fetchImpl) {
+  const base = trimSlash(env.UKRAINE_ALARM_API_BASE || 'https://api.ukrainealarm.com');
   const headers = { Authorization: token, Accept: 'application/json' };
   const warnings = [];
-  let regionId = process.env.KYIV_REGION_ID || '';
+  let regionId = env.KYIV_REGION_ID || '';
 
   if (!regionId) {
     try {
-      const regionsPayload = await fetchJson(`${base}/api/v3/regions`, headers);
+      const regionsPayload = await fetchJson(`${base}/api/v3/regions`, headers, fetchImpl);
       regionId = findKyivRegionId(regionsPayload) || '';
     } catch (error) {
       warnings.push(`Region directory unavailable: ${safeError(error)}`);
@@ -126,8 +231,8 @@ async function fetchUkraineAlarmV3(token) {
   }
 
   const [historyPayload, statusPayload] = await Promise.all([
-    fetchJson(`${base}/api/v3/alerts/regionHistory?regionId=${encodeURIComponent(regionId)}`, headers),
-    fetchJson(`${base}/api/v3/alerts/${encodeURIComponent(regionId)}`, headers),
+    fetchJson(`${base}/api/v3/alerts/regionHistory?regionId=${encodeURIComponent(regionId)}`, headers, fetchImpl),
+    fetchJson(`${base}/api/v3/alerts/${encodeURIComponent(regionId)}`, headers, fetchImpl),
   ]);
 
   const historyGroup = findHistoryGroup(historyPayload, regionId);
@@ -155,7 +260,7 @@ async function fetchUkraineAlarmV3(token) {
   };
 }
 
-function normalizeAlert(raw) {
+export function normalizeAlert(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (normalizeAlertType(raw) !== 'air_raid') return null;
 
@@ -164,9 +269,10 @@ function normalizeAlert(raw) {
   if (!start) return null;
 
   const threats = extractThreats(raw);
-  const level = normalizeLevel(raw.alert_level || raw.alertLevel || raw.level || raw.color, threats);
+  const observedLevel = normalizeLevel(raw.alert_level || raw.alertLevel || raw.level || raw.color, threats);
   const ongoing = Boolean(raw.isContinue ?? raw.is_continue ?? raw.ongoing ?? !end);
-  const phases = normalizePhases(raw.phases || raw.levelHistory || raw.level_history || [], start, end, level, threats);
+  const phases = normalizePhases(raw.phases || raw.levelHistory || raw.level_history || [], start, end);
+  const level = ongoing ? observedLevel : normalizeLevel(phases.at(-1)?.level);
 
   return {
     id: String(raw.id ?? raw.alertId ?? raw.alert_id ?? `${start}|${end || 'open'}`),
@@ -175,7 +281,7 @@ function normalizeAlert(raw) {
     ongoing,
     alertType: 'air_raid',
     level,
-    threats,
+    threats: ongoing ? threats : [],
     phases,
     sourceMessage: String(raw.notes || raw.source_message || raw.sourceMessage || '').trim(),
   };
@@ -224,7 +330,7 @@ function normalizeThreats(value) {
   });
 }
 
-function normalizePhases(value, alertStart, alertEnd, fallbackLevel, threats) {
+function normalizePhases(value, alertStart, alertEnd) {
   const list = Array.isArray(value) ? value : [];
   const phases = list.map(item => ({
     start: firstDate(item, ['started_at', 'startedAt', 'startDate', 'start']) || alertStart,
@@ -233,25 +339,7 @@ function normalizePhases(value, alertStart, alertEnd, fallbackLevel, threats) {
     threats: normalizeThreats(item?.threats || []),
     sourceMessage: String(item?.source_message || item?.sourceMessage || item?.message || '').trim(),
   })).filter(item => item.start);
-
-  if (phases.length) return phases;
-
-  const threatEvents = threats
-    .filter(item => item.startedAt)
-    .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-  if (threatEvents.length) {
-    return threatEvents.map((item, index) => ({
-      start: item.startedAt,
-      end: threatEvents[index + 1]?.startedAt || alertEnd || null,
-      level: item.level || fallbackLevel,
-      threats: [item],
-      sourceMessage: item.sourceMessage,
-    }));
-  }
-
-  return fallbackLevel && fallbackLevel !== 'unknown'
-    ? [{ start: alertStart, end: alertEnd || null, level: fallbackLevel, threats, sourceMessage: '' }]
-    : [];
+  return phases;
 }
 
 function normalizeAlertType(raw) {
@@ -381,11 +469,11 @@ function dedupeAlerts(items) {
   return result;
 }
 
-async function fetchJson(url, headers) {
+async function fetchJson(url, headers, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { headers, signal: controller.signal, cache: 'no-store' });
+    const response = await fetchImpl(url, { headers, signal: controller.signal, cache: 'no-store' });
     const text = await response.text();
     if (!response.ok) throw new Error(`HTTP ${response.status}${text ? ` · ${text.slice(0, 120)}` : ''}`);
     try { return JSON.parse(text); }

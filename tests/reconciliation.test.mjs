@@ -4,11 +4,12 @@ import test from 'node:test';
 import { resolveActiveAlert } from '../netlify/functions/air-alerts.mjs';
 import {
   applyObservedPhaseRecords,
+  findMatchingAlert,
   mergeSavedClassification,
   normalizeObservedPhaseRecords,
   reconcileLiveAlertState,
   updateObservedPhaseRecords,
-} from '../public/alert-reconciliation-v1.mjs';
+} from '../public/alert-reconciliation-v2.mjs';
 
 const MINUTE = 60 * 1000;
 const START = Date.UTC(2026, 8, 11, 9, 10);
@@ -20,7 +21,7 @@ function alert(overrides = {}) {
     endMs: START + 10 * MINUTE,
     ongoing: true,
     level: 'yellow',
-    threats: [{ type: 'drones', level: 'yellow' }],
+    threats: [{ type: 'drones', level: 'yellow', startedAtMs: START }],
     phases: [],
     source: 'test',
     sourceMessage: '',
@@ -29,14 +30,16 @@ function alert(overrides = {}) {
 }
 
 test('a confirmed all-clear closes a stale open history interval immediately', () => {
+  const observedAt = START + 35 * MINUTE;
   const result = reconcileLiveAlertState([alert()], {
     liveStateKnown: true,
     liveActiveAlert: null,
+    liveObservedAtMs: observedAt,
     nowMs: START + 37 * MINUTE,
   });
 
   assert.equal(result[0].ongoing, false);
-  assert.equal(result[0].endMs, START + 37 * MINUTE);
+  assert.equal(result[0].endMs, observedAt);
 });
 
 test('an unavailable live feed does not override Kyiv Digital current state', () => {
@@ -47,6 +50,35 @@ test('an unavailable live feed does not override Kyiv Digital current state', ()
   });
 
   assert.equal(result[0].ongoing, true);
+});
+
+test('an older all-clear snapshot cannot close an alert that started later', () => {
+  const newerAlert = alert({
+    startMs: START + 40 * MINUTE,
+    endMs: START + 45 * MINUTE,
+  });
+  const result = reconcileLiveAlertState([newerAlert], {
+    liveStateKnown: true,
+    liveActiveAlert: null,
+    liveObservedAtMs: START + 39 * MINUTE,
+    nowMs: START + 45 * MINUTE,
+  });
+
+  assert.equal(result[0].ongoing, true);
+  assert.equal(result[0].endMs, START + 45 * MINUTE);
+});
+
+test('nearby non-overlapping alerts are not merged as one incident', () => {
+  const completed = alert({
+    endMs: START + 2 * MINUTE,
+    ongoing: false,
+  });
+  const restarted = alert({
+    startMs: START + 4 * MINUTE,
+    endMs: START + 8 * MINUTE,
+  });
+
+  assert.equal(findMatchingAlert([completed], restarted), null);
 });
 
 test('Ukraine Alarm live status does not resurrect a stale open history row', () => {
@@ -72,7 +104,7 @@ test('yellow and red phases survive the all-clear and attach to the completed al
     id: 'provider-active-id-changed',
     endMs: START + 22 * MINUTE,
     level: 'red',
-    threats: [{ type: 'ballistic_missiles', level: 'red' }],
+    threats: [{ type: 'ballistic_missiles', level: 'red', startedAtMs: START + 22 * MINUTE }],
   });
   records = updateObservedPhaseRecords(records, [redAlert], {
     liveStateKnown: true,

@@ -5,7 +5,7 @@ import {
   normalizeObservedPhaseRecords,
   reconcileLiveAlertState,
   updateObservedPhaseRecords,
-} from './alert-reconciliation-v1.mjs';
+} from './alert-reconciliation-v2.mjs';
 
 (() => {
   'use strict';
@@ -13,8 +13,8 @@ import {
   const LEGACY_SOURCE_URL = 'https://kyiv.digital/storage/air-alert/stats.html';
   const LEGACY_PROXY_URL = '/api/legacy-history';
   const CLASSIFIED_PROXY_URL = '/api/air-alerts';
-  const CACHE_KEY = 'kyiv-alert-impact-cache-v8';
-  const PREVIOUS_CACHE_KEYS = ['kyiv-alert-impact-cache-v7', 'kyiv-alert-impact-cache-v6'];
+  const CACHE_KEY = 'kyiv-alert-impact-cache-v9';
+  const PREVIOUS_CACHE_KEYS = ['kyiv-alert-impact-cache-v8', 'kyiv-alert-impact-cache-v7', 'kyiv-alert-impact-cache-v6'];
   const OBSERVED_PHASES_KEY = 'kyiv-alert-impact-observed-phases-v2';
   const PREVIOUS_OBSERVED_PHASE_KEYS = ['kyiv-alert-impact-observed-phases-v1'];
   const KYIV_TZ = 'Europe/Kyiv';
@@ -57,6 +57,8 @@ import {
     providerName: '',
     providerUrl: 'https://alerts.in.ua/',
     classificationAvailable: false,
+    classificationStale: false,
+    classificationError: '',
     usedLegacyHistory: false,
     sourceWarnings: [],
     legacyAlertsCache: [],
@@ -307,7 +309,9 @@ import {
     let liveStateKnown = false;
     let liveActiveReported = false;
     let liveActiveAlert = null;
+    let liveObservedAtMs = null;
     let usingCachedFallback = false;
+    let classificationError = '';
 
     if (demoMode) {
       alerts = buildClassifiedDemo();
@@ -336,11 +340,21 @@ import {
       if (classifiedResult.status === 'fulfilled') {
         classifiedEnvelope = classifiedResult.value;
         const hasActiveField = Object.prototype.hasOwnProperty.call(classifiedEnvelope || {}, 'active');
-        liveActiveReported = Boolean(classifiedEnvelope?.active);
-        liveActiveAlert = classifiedEnvelope?.active
+        const hasExplicitLiveState = typeof classifiedEnvelope?.liveStatusKnown === 'boolean';
+        liveStateKnown = hasExplicitLiveState
+          ? classifiedEnvelope.liveStatusKnown
+          : hasActiveField;
+        liveActiveReported = liveStateKnown && Boolean(classifiedEnvelope?.active);
+        liveActiveAlert = liveActiveReported
           ? normalizeClassifiedAlert(classifiedEnvelope.active, classifiedEnvelope)
           : null;
-        liveStateKnown = hasActiveField && (!liveActiveReported || Boolean(liveActiveAlert));
+        liveStateKnown &&= !liveActiveReported || Boolean(liveActiveAlert);
+        const collectorObservedAtMs = toKyivWallMs(classifiedEnvelope?.collector?.lastSuccessAt);
+        liveObservedAtMs = Number.isFinite(collectorObservedAtMs)
+          ? Math.min(collectorObservedAtMs, getKyivNow())
+          : getKyivNow();
+      } else {
+        classificationError = normalizeText(classifiedResult.reason?.message || 'Threat classifier unavailable');
       }
 
       const transitionedToInactive = state.liveStateKnown
@@ -356,11 +370,16 @@ import {
         } catch { /* the live state still closes the alert immediately */ }
       }
 
-      const classifiedAlerts = classifiedEnvelope ? normalizeClassifiedEnvelope(classifiedEnvelope) : [];
+      let classifiedAlerts = classifiedEnvelope ? normalizeClassifiedEnvelope(classifiedEnvelope) : [];
+      if (!liveStateKnown) classifiedAlerts = classifiedAlerts.filter(alert => !alert.ongoing);
+      const serverRecords = normalizeServerPhaseRecords(classifiedEnvelope?.phaseRecords);
+      const phaseObservationMs = liveStateKnown && Number.isFinite(liveObservedAtMs)
+        ? liveObservedAtMs
+        : getKyivNow();
       let observedRecords = updateObservedPhaseRecords(
-        readObservedPhaseRecords(),
+        normalizeObservedPhaseRecords([...readObservedPhaseRecords(), ...serverRecords]),
         classifiedAlerts,
-        { liveStateKnown, liveActiveAlert, nowMs: getKyivNow() },
+        { liveStateKnown, liveActiveAlert, nowMs: phaseObservationMs },
       );
       writeObservedPhaseRecords(observedRecords);
 
@@ -371,6 +390,7 @@ import {
         alerts = reconcileLiveAlertState(alerts, {
           liveStateKnown,
           liveActiveAlert,
+          liveObservedAtMs,
           nowMs: getKyivNow(),
         });
         mode = classifiedEnvelope?.classificationAvailable || classifiedAlerts.some(hasClientClassification)
@@ -387,6 +407,7 @@ import {
           alerts = reconcileLiveAlertState(alerts, {
             liveStateKnown,
             liveActiveAlert,
+            liveObservedAtMs,
             nowMs: getKyivNow(),
           });
         }
@@ -424,12 +445,15 @@ import {
     state.providerUrl = classifiedEnvelope?.providerUrl
       || (['live-unclassified', 'unavailable'].includes(mode) ? LEGACY_SOURCE_URL : 'https://alerts.in.ua/');
     state.classificationAvailable = Boolean(classifiedEnvelope?.classificationAvailable) || state.alerts.some(hasClientClassification);
+    state.classificationStale = Boolean(classifiedEnvelope?.collector?.stale);
+    state.classificationError = classificationError;
     state.usedLegacyHistory = legacyAlerts.length > 0;
     state.liveStateKnown = liveStateKnown;
     state.liveActiveReported = liveActiveReported;
     state.sourceWarnings = [
       ...(historyEnvelope?.warning ? [historyEnvelope.warning] : []),
       ...(classifiedEnvelope?.warnings || []),
+      ...(classificationError ? [classificationError] : []),
     ];
     state.days = buildDailyModel(state.alerts);
     setBaselineBounds();
@@ -438,8 +462,8 @@ import {
 
     renderAll();
     renderSourceAttribution();
-    const label = mode === 'live-classified' ? 'Live · classified'
-      : mode === 'live-unclassified' ? 'Live · basic'
+    const label = mode === 'live-classified' ? `Live · tracked${state.classificationStale ? ' ⚠' : ''}`
+      : mode === 'live-unclassified' ? `Live · basic${classificationError ? ' ⚠' : ''}`
         : mode === 'cached' ? 'Cached data'
           : mode === 'demo' ? 'Demo data'
             : 'Data unavailable';
@@ -659,6 +683,22 @@ import {
       } catch { /* try the previous storage format */ }
     }
     return [];
+  }
+
+  function normalizeServerPhaseRecords(value) {
+    const records = (Array.isArray(value) ? value : []).map(record => ({
+      startMs: toKyivWallMs(record?.start),
+      updatedAtMs: toKyivWallMs(record?.updatedAt || record?.start),
+      provisionalEnd: Boolean(record?.provisionalEnd),
+      phases: (Array.isArray(record?.phases) ? record.phases : []).map(phase => ({
+        startMs: toKyivWallMs(phase?.start),
+        endMs: phase?.end == null ? null : toKyivWallMs(phase.end),
+        level: normalizeClientLevel(phase?.level, normalizeClientThreats(phase?.threats)),
+        threats: normalizeClientThreats(phase?.threats),
+        sourceMessage: normalizeText(phase?.sourceMessage),
+      })),
+    }));
+    return normalizeObservedPhaseRecords(records);
   }
 
   function writeObservedPhaseRecords(records) {
@@ -1114,13 +1154,17 @@ import {
   function renderSourceAttribution() {
     const provider = state.providerName || (state.sourceMode === 'unavailable' ? 'Kyiv Digital' : 'Configured alert API');
     if (state.sourceMode === 'live-classified') {
-      els.dataSourcePrimary.textContent = `Live classification: ${provider}`;
-      els.dataSourceSecondary.textContent = state.usedLegacyHistory
-        ? 'Threat levels from the live feed · historical intervals supplemented by Kyiv Digital'
-        : 'Threat levels and alert intervals from the configured live feed';
+      els.dataSourcePrimary.textContent = `Server-tracked classification: ${provider}`;
+      els.dataSourceSecondary.textContent = state.classificationStale
+        ? 'Saved yellow/red history is available · current classification is temporarily stale'
+        : state.usedLegacyHistory
+          ? 'Threat phases are collected 24/7 · alert intervals supplemented by Kyiv Digital'
+          : 'Threat phases and alert intervals are collected continuously on the server';
     } else if (state.sourceMode === 'live-unclassified') {
       els.dataSourcePrimary.textContent = 'Data source: Kyiv Digital';
-      els.dataSourceSecondary.textContent = 'Alert intervals are live · threat classification is currently unavailable';
+      els.dataSourceSecondary.textContent = state.classificationError
+        ? 'Alert intervals are live · the yellow/red classifier is offline'
+        : 'Alert intervals are live · threat classification is currently unavailable';
     } else if (state.sourceMode === 'cached') {
       els.dataSourcePrimary.textContent = `Cached data: ${provider}`;
       els.dataSourceSecondary.textContent = 'Showing the last successful dataset saved in this browser';

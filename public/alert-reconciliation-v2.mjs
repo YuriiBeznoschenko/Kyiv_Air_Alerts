@@ -1,6 +1,8 @@
 const MINUTE = 60 * 1000;
 const MATCH_TOLERANCE_MS = 5 * MINUTE;
+const EXACT_START_TOLERANCE_MS = 90 * 1000;
 const RETENTION_MS = 45 * 24 * 60 * MINUTE;
+const MAX_INITIAL_OBSERVATION_LAG_MS = 90 * 1000;
 
 const KNOWN_LEVELS = new Set(['yellow', 'red']);
 
@@ -28,8 +30,9 @@ export function findMatchingAlert(items, target, toleranceMs = MATCH_TOLERANCE_M
     const score = startDelta <= toleranceMs
       ? 2 - startDelta / toleranceMs
       : overlapRatio;
+    const closeStart = startDelta <= Math.min(toleranceMs, EXACT_START_TOLERANCE_MS);
 
-    if (score > bestScore && (startDelta <= toleranceMs || overlapRatio >= 0.65)) {
+    if (score > bestScore && (closeStart || overlapRatio >= 0.65)) {
       best = item;
       bestScore = score;
     }
@@ -84,7 +87,7 @@ export function updateObservedPhaseRecords(recordsInput, classifiedAlerts, optio
   if (liveStateKnown) {
     for (const record of records) {
       const matchesActive = liveActiveAlert && isSameStart(record.startMs, liveActiveAlert.startMs);
-      if (!matchesActive) closeRecord(record, nowMs, true);
+      if (!matchesActive && record.startMs <= nowMs) closeRecord(record, nowMs, true);
     }
   }
 
@@ -137,13 +140,17 @@ export function reconcileLiveAlertState(alertsInput, options = {}) {
   if (!options.liveStateKnown) return alerts;
 
   const nowMs = finiteNumber(options.nowMs) ?? Date.now();
+  const liveObservedAtMs = finiteNumber(options.liveObservedAtMs) ?? nowMs;
   const activeAlert = options.liveActiveAlert ? cloneAlert(options.liveActiveAlert) : null;
   const activeMatch = activeAlert ? findMatchingAlert(alerts, activeAlert) : null;
 
   for (const alert of alerts) {
     if (!alert.ongoing || alert === activeMatch) continue;
+    // A cached live snapshot cannot prove the state of an alert that started
+    // after that snapshot was observed.
+    if (liveObservedAtMs < alert.startMs) continue;
     alert.ongoing = false;
-    alert.endMs = safeEnd(alert.startMs, nowMs);
+    alert.endMs = safeEnd(alert.startMs, liveObservedAtMs);
   }
 
   if (activeAlert) {
@@ -192,16 +199,14 @@ function observeAlert(records, alert, nowMs) {
     if (phaseRecordScore(providerRecord) >= phaseRecordScore(record)) Object.assign(record, providerRecord);
   }
 
-  if (!record && KNOWN_LEVELS.has(level)) {
+  // A final colour on an already completed provider row is not proof that the
+  // whole alert had that colour. Only a live observation or explicit phases
+  // may create colour history.
+  if (!record && alert?.ongoing && KNOWN_LEVELS.has(level)) {
+    const phases = initialObservedPhases(alert, startMs, nowMs, level);
     record = {
       startMs,
-      phases: [{
-        startMs,
-        endMs: alert?.ongoing ? null : safeEnd(startMs, endMs ?? nowMs),
-        level,
-        threats: cloneThreats(alert?.threats),
-        sourceMessage: String(alert?.sourceMessage || ''),
-      }],
+      phases,
       updatedAtMs: nowMs,
       provisionalEnd: false,
     };
@@ -216,9 +221,10 @@ function observeAlert(records, alert, nowMs) {
   if (alert?.ongoing) {
     const nextLevel = KNOWN_LEVELS.has(level) ? level : 'unknown';
     if (last.level !== nextLevel) {
-      last.endMs = safeEnd(last.startMs, nowMs);
+      const transitionMs = inferTransitionMs(alert, last, nextLevel, nowMs);
+      last.endMs = safeEnd(last.startMs, transitionMs);
       record.phases.push({
-        startMs: nowMs,
+        startMs: last.endMs,
         endMs: null,
         level: nextLevel,
         threats: cloneThreats(alert?.threats),
@@ -233,6 +239,120 @@ function observeAlert(records, alert, nowMs) {
   } else {
     closeRecord(record, endMs ?? nowMs, false);
   }
+}
+
+function initialObservedPhases(alert, alertStartMs, nowMs, fallbackLevel) {
+  const events = cloneThreats(alert?.threats)
+    .map(threat => ({ ...threat, startedAtMs: finiteNumber(threat?.startedAtMs) }))
+    .filter(threat => KNOWN_LEVELS.has(normalizeLevel(threat.level))
+      && Number.isFinite(threat.startedAtMs)
+      && threat.startedAtMs >= alertStartMs
+      && threat.startedAtMs <= nowMs)
+    .sort((a, b) => a.startedAtMs - b.startedAtMs);
+
+  if (!events.length) {
+    // When the collector first sees an alert long after it began and the
+    // provider gives no phase timestamp, the earlier interval is unknowable.
+    // Mark it unknown instead of falsely assigning the current colour to it.
+    const observedStartMs = nowMs - alertStartMs <= MAX_INITIAL_OBSERVATION_LAG_MS
+      ? alertStartMs
+      : nowMs;
+    const phases = observedStartMs > alertStartMs
+      ? [{
+          startMs: alertStartMs,
+          endMs: observedStartMs,
+          level: 'unknown',
+          threats: [],
+          sourceMessage: '',
+        }]
+      : [];
+    phases.push({
+      startMs: observedStartMs,
+      endMs: null,
+      level: fallbackLevel,
+      threats: cloneThreats(alert?.threats),
+      sourceMessage: String(alert?.sourceMessage || ''),
+    });
+    return phases;
+  }
+
+  const phases = [];
+  const activeThreats = [];
+  let currentLevel = 'unknown';
+  let cursor = alertStartMs;
+  let index = 0;
+
+  while (index < events.length) {
+    const eventMs = events[index].startedAtMs;
+    while (index < events.length && events[index].startedAtMs === eventMs) {
+      activeThreats.push(events[index]);
+      index += 1;
+    }
+    const nextLevel = strongestLevel(activeThreats.map(threat => threat.level));
+    if (nextLevel === currentLevel) continue;
+    if (eventMs > cursor) {
+      phases.push({
+        startMs: cursor,
+        endMs: eventMs,
+        level: currentLevel,
+        threats: currentLevel === 'unknown'
+          ? []
+          : cloneThreats(activeThreats.filter(threat => normalizeLevel(threat.level) === currentLevel)),
+        sourceMessage: '',
+      });
+    }
+    cursor = Math.max(cursor, eventMs);
+    currentLevel = nextLevel;
+  }
+
+  if (currentLevel !== fallbackLevel) {
+    if (nowMs > cursor) {
+      phases.push({
+        startMs: cursor,
+        endMs: nowMs,
+        level: currentLevel,
+        threats: cloneThreats(activeThreats),
+        sourceMessage: '',
+      });
+    }
+    cursor = Math.max(cursor, nowMs);
+    currentLevel = fallbackLevel;
+  }
+
+  phases.push({
+    startMs: cursor,
+    endMs: null,
+    level: currentLevel,
+    threats: cloneThreats(alert?.threats),
+    sourceMessage: String(alert?.sourceMessage || ''),
+  });
+  return phases.filter(phase => phase.endMs == null || phase.endMs > phase.startMs);
+}
+
+function inferTransitionMs(alert, lastPhase, nextLevel, nowMs) {
+  const lastLevel = normalizeLevel(lastPhase?.level);
+  const isEscalation = levelRank(nextLevel) > levelRank(lastLevel);
+  if (!isEscalation) return nowMs;
+
+  const candidates = cloneThreats(alert?.threats)
+    .filter(threat => normalizeLevel(threat?.level) === nextLevel)
+    .map(threat => finiteNumber(threat?.startedAtMs))
+    .filter(startedAtMs => Number.isFinite(startedAtMs)
+      && startedAtMs >= lastPhase.startMs
+      && startedAtMs <= nowMs)
+    .sort((a, b) => a - b);
+  return candidates[0] ?? nowMs;
+}
+
+function strongestLevel(levels) {
+  return (Array.isArray(levels) ? levels : []).reduce((strongest, level) => (
+    levelRank(level) > levelRank(strongest) ? normalizeLevel(level) : strongest
+  ), 'unknown');
+}
+
+function levelRank(level) {
+  const normalized = normalizeLevel(level);
+  return normalized === 'red' ? 2 : normalized === 'yellow' ? 1 : 0;
 }
 
 function closeRecord(record, endMs, provisional) {
@@ -293,7 +413,7 @@ function findPhaseRecord(records, target) {
   const startMs = finiteNumber(target?.startMs);
   if (!Number.isFinite(startMs)) return null;
   return (Array.isArray(records) ? records : [])
-    .filter(record => Math.abs(Number(record.startMs) - startMs) <= MATCH_TOLERANCE_MS)
+    .filter(record => Math.abs(Number(record.startMs) - startMs) <= EXACT_START_TOLERANCE_MS)
     .sort((a, b) => Math.abs(a.startMs - startMs) - Math.abs(b.startMs - startMs))[0] || null;
 }
 
@@ -339,7 +459,7 @@ function normalizeLevel(value) {
 function isSameStart(a, b) {
   return Number.isFinite(Number(a))
     && Number.isFinite(Number(b))
-    && Math.abs(Number(a) - Number(b)) <= MATCH_TOLERANCE_MS;
+    && Math.abs(Number(a) - Number(b)) <= EXACT_START_TOLERANCE_MS;
 }
 
 function safeEnd(startMs, candidateEndMs) {
