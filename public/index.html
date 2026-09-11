@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f4f3ef" />
+  <meta name="description" content="Kyiv city air-raid alert impact dashboard with live threat classification and historical context." />
+  <meta name="application-version" content="7" />
+  <title>Kyiv Air-Raid Impact</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◉</text></svg>" />
+  <link rel="stylesheet" href="styles-v7.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to dashboard</a>
+
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#" aria-label="Kyiv Air-Raid Impact home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" role="img">
+            <path d="M6 17h4l2.1-7 4.2 14 3-10 2 6H26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span>
+          <strong>Kyiv Air-Raid Impact</strong>
+          <small>City-level disruption monitor</small>
+        </span>
+      </a>
+
+      <div class="header-actions">
+        <div class="feed-chip" id="feedChip" data-state="loading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="feedLabel">Connecting…</span>
+        </div>
+        <span class="updated-label" id="updatedLabel">Waiting for data</span>
+        <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh data">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 8.3A7 7 0 0 1 18.4 7M17.9 15.7A7 7 0 0 1 5.6 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero-section">
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow" id="todayEyebrow">TODAY · KYIV CITY</div>
+          <h1 id="heroHeadline"><span class="skeleton skeleton-title"></span></h1>
+          <p class="hero-subline" id="heroSubline"><span class="skeleton skeleton-line"></span></p>
+          <div class="current-status" id="currentStatus" data-alert="false" data-level="none">
+            <span class="current-status-icon" aria-hidden="true"></span>
+            <span id="currentStatusText">Checking current status…</span>
+          </div>
+          <div class="threat-summary" id="threatSummary" aria-label="Today alert time by threat level" hidden>
+            <span class="threat-chip is-yellow"><i aria-hidden="true"></i><span><strong id="yellowToday">0 min</strong><small>Yellow · drone warning</small></span></span>
+            <span class="threat-chip is-red"><i aria-hidden="true"></i><span><strong id="redToday">0 min</strong><small>Red · high-level threat</small></span></span>
+            <span class="threat-chip is-unknown"><i aria-hidden="true"></i><span><strong id="unknownToday">0 min</strong><small>Classification unavailable</small></span></span>
+          </div>
+        </div>
+
+        <div class="kpi-grid" aria-label="Today summary">
+          <article class="kpi-card">
+            <span class="kpi-label">Alerts today</span>
+            <strong class="kpi-value" id="kpiCount">—</strong>
+            <span class="kpi-note" id="kpiCountNote">Started today</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Total alert time</span>
+            <strong class="kpi-value" id="kpiTotal">—</strong>
+            <span class="kpi-note">Across the full day</span>
+          </article>
+          <article class="kpi-card kpi-card-accent">
+            <span class="kpi-label">Alert time · 09:00–18:00</span>
+            <strong class="kpi-value" id="kpiWork">—</strong>
+            <span class="kpi-note">Daytime work window</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Longest alert</span>
+            <strong class="kpi-value" id="kpiLongest">—</strong>
+            <span class="kpi-note" id="kpiLongestNote">Single alert</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-section">
+      <div class="shell">
+        <div class="baseline-strip" id="baselineStrip">
+          <div class="baseline-heading">
+            <div class="baseline-topline">
+              <span class="section-kicker">BASELINE · AVERAGE</span>
+              <button class="baseline-range-trigger" id="baselineRangeTrigger" type="button" aria-haspopup="dialog" aria-controls="baselineModal" aria-expanded="false">
+                <span class="baseline-trigger-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4.5 9h15M6.5 5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                </span>
+                <span class="baseline-trigger-copy">
+                  <small>Usual period</small>
+                  <strong id="baselineRangeLabel">1–26 Aug 2026</strong>
+                </span>
+                <span class="baseline-trigger-action">Change</span>
+                <span class="baseline-trigger-chevron" aria-hidden="true"></span>
+              </button>
+            </div>
+            <strong>What “usual” looked like in the selected period</strong>
+            <span class="baseline-period-meta" id="baselinePeriodMeta">26 calendar days · zero-alert days included</span>
+          </div>
+          <div class="baseline-metrics">
+            <div><strong id="baselineCount">2.42</strong><span>alerts / day</span></div>
+            <div><strong id="baselineTotal">1 h 54 min</strong><span>alert time / day</span></div>
+            <div><strong id="baselineWork">0 h 27 min</strong><span>during 09:00–18:00</span></div>
+          </div>
+          <div class="baseline-insight" id="baselineInsight">Loading comparison…</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="timeline-section" aria-labelledby="timelineTitle">
+      <div class="shell">
+        <div class="section-header">
+          <div>
+            <span class="section-kicker">ACTUAL TIME OF DAY</span>
+            <h2 id="timelineTitle">When alerts happened</h2>
+            <p>Each block is one alert. Its position shows when it happened; its height shows how long it lasted.</p>
+          </div>
+          <div class="timeline-controls" aria-label="Timeline controls">
+            <div class="segmented-control" role="group" aria-label="Number of days">
+              <button type="button" data-range="7">7 days</button>
+              <button type="button" data-range="10" class="is-active">10 days</button>
+              <button type="button" data-range="14">14 days</button>
+            </div>
+            <label class="toggle-control">
+              <input type="checkbox" id="workToggle" checked />
+              <span class="toggle-ui" aria-hidden="true"></span>
+              <span>Highlight 09:00–18:00</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="legend" aria-label="Timeline legend">
+          <span><i class="legend-swatch swatch-yellow"></i>Yellow · drone warning</span>
+          <span><i class="legend-swatch swatch-red"></i>Red · high-level threat</span>
+          <span><i class="legend-swatch swatch-unknown"></i>Classification unavailable</span>
+          <span><i class="legend-swatch swatch-window"></i>09:00–18:00 window</span>
+          <span><i class="legend-calendar">Sat</i>Weekend / national holiday marker</span>
+        </div>
+
+        <div class="desktop-timeline-wrap" id="desktopTimelineWrap">
+          <div class="time-axis" aria-hidden="true">
+            <span style="top:0%">00:00</span>
+            <span style="top:25%">06:00</span>
+            <span class="axis-accent" style="top:37.5%">09:00</span>
+            <span style="top:50%">12:00</span>
+            <span class="axis-accent" style="top:75%">18:00</span>
+            <span style="top:100%">24:00</span>
+          </div>
+          <div class="timeline-scroll" id="timelineScroll" tabindex="0" aria-label="Air-raid alert timeline; scroll horizontally for more days">
+            <div class="timeline-grid" id="timelineGrid"></div>
+          </div>
+        </div>
+
+        <div class="mobile-timeline" id="mobileTimeline"></div>
+      </div>
+    </section>
+
+    <section class="detail-section" aria-labelledby="detailTitle">
+      <div class="shell">
+        <div class="detail-card">
+          <div class="detail-header">
+            <div>
+              <span class="section-kicker">SELECTED DAY</span>
+              <h2 id="detailTitle">Alert detail</h2>
+              <p id="detailSummary">Select a day in the timeline.</p>
+            </div>
+            <div class="detail-pills" id="detailPills"></div>
+          </div>
+          <div class="detail-list" id="detailList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="method-section">
+      <div class="shell method-grid">
+        <div>
+          <span class="section-kicker">HOW TO READ THIS</span>
+          <h2>One glance first. Detail only when needed.</h2>
+        </div>
+        <div class="method-items">
+          <article><span>01</span><div><strong>Position = time</strong><p>A block near the top happened at night; lower blocks happened later in the day.</p></div></article>
+          <article><span>02</span><div><strong>Size = duration</strong><p>Taller blocks lasted longer. Tiny blocks remain available through hover, focus, or the detail list.</p></div></article>
+          <article><span>03</span><div><strong>Colour = threat level</strong><p>Yellow marks a drone warning; red marks a high-level threat. Blue-grey means classification was unavailable.</p></div></article>
+          <article><span>04</span><div><strong>Shaded band = 09:00–18:00</strong><p>The background band shows the daytime work window without changing the threat colour.</p></div></article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <div>
+        <strong id="dataSourcePrimary">Data source: configured alert API</strong>
+        <span id="dataSourceSecondary">Live classification · historical intervals supplemented by Kyiv Digital</span>
+      </div>
+      <div class="footer-note">Intervals crossing midnight are split across calendar days. Durations are recalculated from timestamps. Unclassified history stays blue-grey rather than being guessed. This dashboard is informational and is not an official warning channel.</div>
+      <a id="dataSourceLink" href="https://alerts.in.ua/" target="_blank" rel="noreferrer">Open data source ↗</a>
+    </div>
+  </footer>
+
+
+  <div class="date-range-modal" id="baselineModal" hidden>
+    <div class="date-range-backdrop" data-baseline-close></div>
+    <section class="date-range-sheet" role="dialog" aria-modal="true" aria-labelledby="baselineModalTitle">
+      <div class="date-range-handle" aria-hidden="true"></div>
+      <header class="date-range-header">
+        <div class="date-range-title-wrap">
+          <span class="date-range-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 3v3M17 3v3M4.5 9h15M6.5 5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          </span>
+          <div>
+            <span class="section-kicker">BASELINE PERIOD</span>
+            <h2 id="baselineModalTitle">Define what “usual” means</h2>
+            <p>Choose complete calendar days. Days with zero alerts are included in the average.</p>
+          </div>
+        </div>
+        <button class="date-range-close" id="baselineClose" type="button" aria-label="Close date picker" data-baseline-close>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+
+      <div class="date-range-presets-block">
+        <span class="date-control-label">Quick ranges</span>
+        <div class="date-range-presets" aria-label="Quick baseline ranges">
+          <button type="button" data-baseline-preset="pre-spike">1–26 Aug 2026</button>
+          <button type="button" data-baseline-preset="previous-7">Previous 7 days</button>
+          <button type="button" data-baseline-preset="previous-30">Previous 30 days</button>
+        </div>
+      </div>
+
+      <div class="date-range-selection" aria-live="polite">
+        <div class="date-selection-value">
+          <span>From</span>
+          <strong id="baselineDraftStart">01 Aug 2026</strong>
+        </div>
+        <span class="date-selection-arrow" aria-hidden="true">→</span>
+        <div class="date-selection-value">
+          <span>To</span>
+          <strong id="baselineDraftEnd">26 Aug 2026</strong>
+        </div>
+        <span class="date-selection-days" id="baselineDraftDays">26 complete days</span>
+      </div>
+
+      <footer class="date-range-actions date-range-actions-top">
+        <button class="date-range-secondary" id="baselineCancel" type="button" data-baseline-close>Cancel</button>
+        <button class="date-range-primary" id="baselineApply" type="button">Use this average</button>
+      </footer>
+
+      <div class="calendar-section-label"><span>Or choose a custom range</span></div>
+
+      <div class="calendar-card">
+        <div class="calendar-toolbar">
+          <button class="calendar-nav" id="calendarPrev" type="button" aria-label="Previous month">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <strong id="calendarMonthLabel">August 2026</strong>
+          <button class="calendar-nav" id="calendarNext" type="button" aria-label="Next month">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <div class="calendar-weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+        <div class="calendar-grid" id="calendarGrid" role="grid" aria-label="Choose baseline date range"></div>
+      </div>
+
+      <div class="date-range-host-clearance" aria-hidden="true"></div>
+    </section>
+  </div>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app-v7.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+[build]
+  publish = "public"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/legacy-history"
+  to = "/.netlify/functions/legacy-history"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/air-alerts"
+  to = "/.netlify/functions/air-alerts"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+[[headers]]
+  for = "/app-v7.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/styles-v7.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

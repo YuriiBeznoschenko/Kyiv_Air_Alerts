@@ -1,0 +1,3 @@
+/api/legacy-history  /.netlify/functions/legacy-history              200
+/api/air-alerts      /.netlify/functions/air-alerts                 200
+/*                   /index.html                                    200
