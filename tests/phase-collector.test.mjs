@@ -234,6 +234,13 @@ test('an all-clear active response is a successful authoritative snapshot', asyn
   assert.equal(result.payload.classificationAvailable, true);
 });
 
+test('an empty collector has null timestamps rather than Unix epoch', () => {
+  const payload = buildCollectorPayload(null, { nowMs: START });
+  assert.equal(payload.collector.lastAttemptAt, null);
+  assert.equal(payload.collector.lastSuccessAt, null);
+  assert.equal(payload.liveStatusKnown, false);
+});
+
 test('completed provider history is not painted one colour without phase evidence', () => {
   const alert = normalizeAlert({
     id: 9,

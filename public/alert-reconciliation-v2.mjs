@@ -469,6 +469,7 @@ function safeEnd(startMs, candidateEndMs) {
 }
 
 function finiteNumber(value) {
+  if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
