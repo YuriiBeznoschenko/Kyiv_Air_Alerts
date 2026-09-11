@@ -1,12 +1,22 @@
+import {
+  applyObservedPhaseRecords,
+  findMatchingAlert,
+  mergeSavedClassification,
+  normalizeObservedPhaseRecords,
+  reconcileLiveAlertState,
+  updateObservedPhaseRecords,
+} from './alert-reconciliation-v1.mjs';
+
 (() => {
   'use strict';
 
   const LEGACY_SOURCE_URL = 'https://kyiv.digital/storage/air-alert/stats.html';
   const LEGACY_PROXY_URL = '/api/legacy-history';
   const CLASSIFIED_PROXY_URL = '/api/air-alerts';
-  const CACHE_KEY = 'kyiv-alert-impact-cache-v7';
-  const PREVIOUS_CACHE_KEYS = ['kyiv-alert-impact-cache-v6'];
-  const OBSERVED_PHASES_KEY = 'kyiv-alert-impact-observed-phases-v1';
+  const CACHE_KEY = 'kyiv-alert-impact-cache-v8';
+  const PREVIOUS_CACHE_KEYS = ['kyiv-alert-impact-cache-v7', 'kyiv-alert-impact-cache-v6'];
+  const OBSERVED_PHASES_KEY = 'kyiv-alert-impact-observed-phases-v2';
+  const PREVIOUS_OBSERVED_PHASE_KEYS = ['kyiv-alert-impact-observed-phases-v1'];
   const KYIV_TZ = 'Europe/Kyiv';
   const WORK_START = 9 * 60;
   const WORK_END = 18 * 60;
@@ -51,6 +61,8 @@
     sourceWarnings: [],
     legacyAlertsCache: [],
     legacyFetchedAt: 0,
+    liveStateKnown: false,
+    liveActiveReported: false,
     baseline: FALLBACK_BASELINE,
     baselineRange: readBaselineRange(),
     baselineBounds: { minMs: DEFAULT_BASELINE_RANGE.startMs, maxMs: DEFAULT_BASELINE_RANGE.endMs },
@@ -285,12 +297,17 @@
     setFeedState('loading', 'Refreshing');
 
     const demoMode = new URLSearchParams(window.location.search).get('demo') === 'classified';
+    const savedDataset = readCache({ allowExpired: true });
     let alerts = [];
     let mode = 'live-unclassified';
     let classifiedEnvelope = null;
     let historyEnvelope = null;
     let legacyAlerts = [];
     let fetchedAt = Date.now();
+    let liveStateKnown = false;
+    let liveActiveReported = false;
+    let liveActiveAlert = null;
+    let usingCachedFallback = false;
 
     if (demoMode) {
       alerts = buildClassifiedDemo();
@@ -318,13 +335,44 @@
       }
       if (classifiedResult.status === 'fulfilled') {
         classifiedEnvelope = classifiedResult.value;
+        const hasActiveField = Object.prototype.hasOwnProperty.call(classifiedEnvelope || {}, 'active');
+        liveActiveReported = Boolean(classifiedEnvelope?.active);
+        liveActiveAlert = classifiedEnvelope?.active
+          ? normalizeClassifiedAlert(classifiedEnvelope.active, classifiedEnvelope)
+          : null;
+        liveStateKnown = hasActiveField && (!liveActiveReported || Boolean(liveActiveAlert));
       }
 
-      if (legacyAlerts.length || classifiedEnvelope?.alerts?.length) {
-        const classifiedAlerts = classifiedEnvelope
-          ? applyObservedPhaseHistory(normalizeClassifiedEnvelope(classifiedEnvelope))
-          : [];
+      const transitionedToInactive = state.liveStateKnown
+        && state.liveActiveReported
+        && liveStateKnown
+        && !liveActiveReported;
+      if (transitionedToInactive && !force) {
+        try {
+          historyEnvelope = await fetchLegacySource(true);
+          legacyAlerts = normalizeLegacyEnvelope(historyEnvelope);
+          state.legacyAlertsCache = legacyAlerts;
+          state.legacyFetchedAt = Date.now();
+        } catch { /* the live state still closes the alert immediately */ }
+      }
+
+      const classifiedAlerts = classifiedEnvelope ? normalizeClassifiedEnvelope(classifiedEnvelope) : [];
+      let observedRecords = updateObservedPhaseRecords(
+        readObservedPhaseRecords(),
+        classifiedAlerts,
+        { liveStateKnown, liveActiveAlert, nowMs: getKyivNow() },
+      );
+      writeObservedPhaseRecords(observedRecords);
+
+      if (legacyAlerts.length || classifiedAlerts.length || liveActiveAlert) {
         alerts = mergeAlertSources(legacyAlerts, classifiedAlerts);
+        alerts = mergeSavedClassification(alerts, savedDataset?.alerts || []);
+        alerts = applyObservedPhaseRecords(alerts, observedRecords);
+        alerts = reconcileLiveAlertState(alerts, {
+          liveStateKnown,
+          liveActiveAlert,
+          nowMs: getKyivNow(),
+        });
         mode = classifiedEnvelope?.classificationAvailable || classifiedAlerts.some(hasClientClassification)
           ? 'live-classified'
           : 'live-unclassified';
@@ -335,13 +383,23 @@
       const cached = readCache();
       if (cached?.alerts?.length) {
         alerts = cached.alerts;
+        if (!demoMode && liveStateKnown) {
+          alerts = reconcileLiveAlertState(alerts, {
+            liveStateKnown,
+            liveActiveAlert,
+            nowMs: getKyivNow(),
+          });
+        }
         fetchedAt = cached.fetchedAt || fetchedAt;
         classifiedEnvelope = cached.source || null;
         mode = 'cached';
+        usingCachedFallback = true;
       } else {
         mode = 'unavailable';
       }
-    } else if (!demoMode) {
+    }
+
+    if (alerts.length && !demoMode && !usingCachedFallback) {
       try {
         localStorage.setItem(CACHE_KEY, JSON.stringify({
           alerts,
@@ -367,6 +425,8 @@
       || (['live-unclassified', 'unavailable'].includes(mode) ? LEGACY_SOURCE_URL : 'https://alerts.in.ua/');
     state.classificationAvailable = Boolean(classifiedEnvelope?.classificationAvailable) || state.alerts.some(hasClientClassification);
     state.usedLegacyHistory = legacyAlerts.length > 0;
+    state.liveStateKnown = liveStateKnown;
+    state.liveActiveReported = liveActiveReported;
     state.sourceWarnings = [
       ...(historyEnvelope?.warning ? [historyEnvelope.warning] : []),
       ...(classifiedEnvelope?.warnings || []),
@@ -461,27 +521,29 @@
   }
 
   function normalizeClassifiedEnvelope(envelope) {
-    const now = getKyivNow();
     const list = Array.isArray(envelope?.alerts) ? envelope.alerts : [];
-    return list.map(raw => {
-      const startMs = toKyivWallMs(raw.start);
-      const endMs = raw.ongoing || !raw.end ? now : toKyivWallMs(raw.end);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
-      const threats = normalizeClientThreats(raw.threats);
-      const level = normalizeClientLevel(raw.level, threats);
-      const phases = normalizeClientPhases(raw.phases, startMs, endMs, level, threats);
-      return {
-        id: String(raw.id || `${startMs}|${raw.ongoing ? 'open' : endMs}`),
-        startMs,
-        endMs,
-        ongoing: Boolean(raw.ongoing),
-        level,
-        threats,
-        phases,
-        sourceMessage: normalizeText(raw.sourceMessage),
-        source: envelope.provider || 'Configured alert API',
-      };
-    }).filter(Boolean);
+    return list.map(raw => normalizeClassifiedAlert(raw, envelope)).filter(Boolean);
+  }
+
+  function normalizeClassifiedAlert(raw, envelope) {
+    const now = getKyivNow();
+    const startMs = toKyivWallMs(raw?.start);
+    const endMs = raw?.ongoing || !raw?.end ? now : toKyivWallMs(raw.end);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
+    const threats = normalizeClientThreats(raw?.threats);
+    const level = normalizeClientLevel(raw?.level, threats);
+    const phases = normalizeClientPhases(raw?.phases, startMs, endMs, level, threats);
+    return {
+      id: String(raw?.id || `${startMs}|${raw?.ongoing ? 'open' : endMs}`),
+      startMs,
+      endMs,
+      ongoing: Boolean(raw?.ongoing),
+      level,
+      threats,
+      phases,
+      sourceMessage: normalizeText(raw?.sourceMessage),
+      source: envelope?.provider || 'Configured alert API',
+    };
   }
 
   function normalizeClientThreats(value) {
@@ -547,6 +609,7 @@
     classifiedAlerts.forEach(classified => {
       const match = findMatchingAlert(merged, classified);
       if (match) {
+        const legacyWasOngoing = match.ongoing;
         match.id = classified.id || match.id;
         match.level = classified.level !== 'unknown' ? classified.level : match.level;
         match.threats = classified.threats?.length ? classified.threats : match.threats;
@@ -556,6 +619,9 @@
         if (classified.ongoing) {
           match.endMs = classified.endMs;
           match.ongoing = true;
+        } else if (legacyWasOngoing) {
+          match.endMs = classified.endMs;
+          match.ongoing = false;
         }
       } else {
         merged.push(normalizeSerializedAlert(classified));
@@ -574,7 +640,7 @@
           ...richer,
           startMs: Math.min(previous.startMs, alert.startMs),
           endMs: Math.max(previous.endMs, alert.endMs),
-          ongoing: previous.ongoing || alert.ongoing,
+          ongoing: previous.ongoing && alert.ongoing,
         };
       } else {
         deduped.push(alert);
@@ -583,66 +649,20 @@
     return deduped;
   }
 
-  function findMatchingAlert(items, target) {
-    let best = null;
-    let bestScore = 0;
-    items.forEach(item => {
-      const startDelta = Math.abs(item.startMs - target.startMs);
-      const overlap = Math.max(0, Math.min(item.endMs, target.endMs) - Math.max(item.startMs, target.startMs));
-      const targetDuration = Math.max(MINUTE, target.endMs - target.startMs);
-      const itemDuration = Math.max(MINUTE, item.endMs - item.startMs);
-      const overlapRatio = overlap / Math.min(targetDuration, itemDuration);
-      const score = startDelta <= 5 * MINUTE ? 2 - startDelta / (5 * MINUTE) : overlapRatio;
-      if (score > bestScore && (startDelta <= 5 * MINUTE || overlapRatio >= .65)) {
-        best = item;
-        bestScore = score;
-      }
-    });
-    return best;
+  function readObservedPhaseRecords() {
+    for (const key of [OBSERVED_PHASES_KEY, ...PREVIOUS_OBSERVED_PHASE_KEYS]) {
+      try {
+        const saved = localStorage.getItem(key);
+        if (!saved) continue;
+        const records = normalizeObservedPhaseRecords(JSON.parse(saved));
+        if (records.length) return records;
+      } catch { /* try the previous storage format */ }
+    }
+    return [];
   }
 
-  function applyObservedPhaseHistory(alerts) {
-    let stored = {};
-    try { stored = JSON.parse(localStorage.getItem(OBSERVED_PHASES_KEY)) || {}; } catch { stored = {}; }
-    const now = getKyivNow();
-
-    alerts.forEach(alert => {
-      const key = alert.id || String(alert.startMs);
-      const providerHasHistory = alert.phases?.length > 1;
-      const classified = alert.level !== 'unknown';
-      if (!classified) return;
-
-      const history = Array.isArray(stored[key]) ? stored[key] : [];
-      if (alert.ongoing && !providerHasHistory) {
-        if (!history.length) {
-          history.push({ startMs: alert.startMs, endMs: null, level: alert.level, threats: alert.threats, sourceMessage: alert.sourceMessage });
-        } else {
-          const last = history.at(-1);
-          if (last.level !== alert.level) {
-            last.endMs = now;
-            history.push({ startMs: now, endMs: null, level: alert.level, threats: alert.threats, sourceMessage: alert.sourceMessage });
-          }
-        }
-        alert.phases = history.map((phase, index) => ({
-          ...phase,
-          endMs: phase.endMs || history[index + 1]?.startMs || alert.endMs,
-        }));
-        stored[key] = history;
-      } else if (!alert.ongoing && history.length && !providerHasHistory) {
-        const last = history.at(-1);
-        if (!last.endMs) last.endMs = alert.endMs;
-        alert.phases = history.map((phase, index) => ({ ...phase, endMs: phase.endMs || history[index + 1]?.startMs || alert.endMs }));
-        stored[key] = history;
-      }
-    });
-
-    const cutoff = now - 21 * DAY;
-    Object.keys(stored).forEach(key => {
-      const firstStart = Number(stored[key]?.[0]?.startMs || 0);
-      if (!firstStart || firstStart < cutoff) delete stored[key];
-    });
-    try { localStorage.setItem(OBSERVED_PHASES_KEY, JSON.stringify(stored)); } catch { /* ignore */ }
-    return alerts;
+  function writeObservedPhaseRecords(records) {
+    try { localStorage.setItem(OBSERVED_PHASES_KEY, JSON.stringify(records)); } catch { /* storage may be unavailable */ }
   }
 
   function buildClassifiedDemo() {
@@ -741,11 +761,12 @@
     return Date.UTC(Number(p.year), Number(p.month)-1, Number(p.day), Number(p.hour), Number(p.minute));
   }
 
-  function readCache() {
+  function readCache({ allowExpired = false } = {}) {
     for (const key of [CACHE_KEY, ...PREVIOUS_CACHE_KEYS]) {
       try {
         const data = JSON.parse(localStorage.getItem(key));
-        if (data?.alerts?.length && Date.now() - data.fetchedAt <= 48 * 60 * 60 * 1000) return data;
+        const freshEnough = Date.now() - Number(data?.fetchedAt || 0) <= 48 * 60 * 60 * 1000;
+        if (data?.alerts?.length && (allowExpired || freshEnough)) return data;
       } catch { /* try the next compatible cache key */ }
     }
     return null;

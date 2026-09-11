@@ -1,6 +1,16 @@
-# Kyiv Air-Raid Impact — v7
+# Kyiv Air-Raid Impact — v8
 
-Responsive, no-framework dashboard for Kyiv City air-raid alerts. The v7 release keeps the v6 interface and moves heavy history parsing to a cached Netlify Function.
+Responsive, no-framework dashboard for Kyiv City air-raid alerts. The v8 release keeps the v7 data pipeline and fixes live all-clear handling and threat-phase retention.
+
+## What v8 fixes
+
+- A successful live-status response is authoritative for the current banner. A lagging open row in Kyiv Digital can no longer keep the alert marked active after an all-clear.
+- The current-status endpoint no longer permits a five-minute stale response; its shared cache is revalidated every 45 seconds.
+- An active-to-inactive transition triggers an immediate uncached history refresh so the exact end time arrives as soon as Kyiv Digital publishes it.
+- Yellow/red phase observations use the alert start time instead of a provider-specific alert ID, so they survive the ID change that commonly happens when an active alert becomes historical.
+- Observed phases are closed on all-clear and reattached to the completed Kyiv Digital interval.
+- Richer classification already saved in the browser is merged into new live data before the cache is updated, so an unclassified history refresh cannot erase it.
+- Compatible v6/v7 caches and the earlier phase-history format are migrated automatically.
 
 ## What v7 fixes
 
@@ -19,7 +29,8 @@ Responsive, no-framework dashboard for Kyiv City air-raid alerts. The v7 release
 ```text
 public/
   index.html
-  app-v7.js
+  app-v8.mjs
+  alert-reconciliation-v1.mjs
   styles-v7.css
   _headers
   _redirects
@@ -86,7 +97,7 @@ KYIV_REGION_ID = 31
 
 Recommended variable scope: **Functions**. Trigger a production deploy after adding or changing environment variables.
 
-Never put a real token in GitHub, a ZIP, `index.html`, `app-v7.js`, `netlify.toml`, `.env.example`, an issue, or chat.
+Never put a real token in GitHub, a ZIP, `index.html`, client-side JavaScript, `netlify.toml`, `.env.example`, an issue, or chat.
 
 Provider options:
 
@@ -103,10 +114,11 @@ Use a token issued by the selected provider. With `auto`, the function tries ale
 Run syntax checks and parser tests:
 
 ```text
-node --check public/app-v7.js
+node --check public/app-v8.mjs
+node --check public/alert-reconciliation-v1.mjs
 node --check netlify/functions/legacy-history.mjs
 node --check netlify/functions/air-alerts.mjs
-node --test tests/legacy-history.test.mjs
+node --test tests/*.test.mjs
 ```
 
 After deployment, verify:

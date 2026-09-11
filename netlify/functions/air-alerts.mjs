@@ -1,4 +1,4 @@
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 45_000;
 const DEFAULT_TIMEOUT_MS = 9_000;
 const KYIV_NAMES = new Set(['м київ', 'місто київ', 'kyiv', 'kyiv city', 'city of kyiv']);
 
@@ -139,9 +139,7 @@ async function fetchUkraineAlarmV3(token) {
     .filter(item => normalizeAlertType(item) === 'air_raid');
   const activeMeta = activeRaw.map(normalizeCurrentMetadata).filter(Boolean)[0] || null;
 
-  let active = history.filter(item => item.ongoing).sort((a, b) => Date.parse(b.start) - Date.parse(a.start))[0] || null;
-  if (active && activeMeta) active = mergeMetadata(active, activeMeta);
-  if (!active && activeMeta?.start) active = { ...activeMeta, end: null, ongoing: true };
+  const active = resolveActiveAlert(history, activeMeta);
 
   const alerts = dedupeAlerts([...history, ...(active ? [active] : [])]);
   if (!alerts.length && !active) throw new Error('No Kyiv alert records returned');
@@ -283,6 +281,24 @@ function mergeMetadata(alert, metadata) {
   };
 }
 
+export function resolveActiveAlert(history, activeMetadata) {
+  // The live status endpoint is authoritative. History can lag after an
+  // all-clear, so an open history row must never resurrect an inactive alert.
+  if (!activeMetadata) return null;
+
+  const openHistory = (Array.isArray(history) ? history : [])
+    .filter(item => item?.ongoing)
+    .sort((a, b) => Date.parse(b.start) - Date.parse(a.start));
+  const matchingHistory = activeMetadata.start
+    ? openHistory.find(item => Math.abs(Date.parse(item.start) - Date.parse(activeMetadata.start)) <= 5 * 60 * 1000)
+    : openHistory[0];
+
+  if (matchingHistory) {
+    return { ...mergeMetadata(matchingHistory, activeMetadata), end: null, ongoing: true };
+  }
+  return activeMetadata.start ? { ...activeMetadata, end: null, ongoing: true } : null;
+}
+
 function hasClassification(alert) {
   return alert?.level === 'yellow' || alert?.level === 'red' || Boolean(alert?.threats?.length) || Boolean(alert?.phases?.length);
 }
@@ -395,12 +411,12 @@ function json(body, status = 200, cacheable = false) {
     ...corsHeaders(),
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': cacheable
-      ? 'public, max-age=15, must-revalidate'
+      ? 'public, max-age=5, must-revalidate'
       : 'no-store',
     'X-Content-Type-Options': 'nosniff',
   };
   if (cacheable) {
-    headers['Netlify-CDN-Cache-Control'] = 'public, durable, s-maxage=60, stale-while-revalidate=300';
+    headers['Netlify-CDN-Cache-Control'] = 'public, durable, s-maxage=45, must-revalidate';
   }
   return new Response(JSON.stringify(body), {
     status,
