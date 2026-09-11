@@ -1,0 +1,4 @@
+.env
+.netlify/
+.sites-runtime/
+v6-source/
