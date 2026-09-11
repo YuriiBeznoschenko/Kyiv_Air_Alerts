@@ -1,0 +1,15 @@
+{
+  "name": "kyiv-air-raid-impact",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0 <25"
+  },
+  "scripts": {
+    "check": "node --check public/app-v9.mjs && node --check public/alert-reconciliation-v2.mjs && node --check netlify/functions/air-alerts.mjs && node --check netlify/functions/collect-alert-phases.mjs && node --check netlify/functions/legacy-history.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@netlify/blobs": "11.0.3"
+  }
+}

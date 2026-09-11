@@ -1,8 +1,21 @@
-# Kyiv Air-Raid Impact — v8
+# Kyiv Air-Raid Impact — v9
 
-Responsive, no-framework dashboard for Kyiv City air-raid alerts. The v8 release keeps the v7 data pipeline and fixes live all-clear handling and threat-phase retention.
+Responsive dashboard for Kyiv City air-raid alerts. The v9 release records yellow/red threat phases continuously on the server instead of relying on an open browser tab.
 
-## What v8 fixes
+## What v9 fixes
+
+- A scheduled Netlify Function polls the classification provider every minute on published production deploys.
+- Yellow/red transitions are stored in a site-wide, strongly consistent Netlify Blobs store and survive browser closure, device changes, and deployments.
+- Provider timestamps are used for escalations when available; otherwise the transition is bounded by the one-minute collection interval.
+- All-clear closes the observed phase immediately, while the exact completed-alert end from Kyiv Digital remains authoritative in the dashboard.
+- Concurrent collectors use ETag-guarded writes and retry against the latest stored state instead of overwriting it.
+- Deploy previews use isolated Blob stores, while production and its scheduled collector share site-wide history across releases.
+- `alerts.in.ua` is preferred when its dedicated token is present because it supplies `alert_level`, threat type, and threat start timestamps.
+- A generic token is automatically tried against the alternate supported provider when `ALERTS_PROVIDER` points at the wrong service.
+- Completed history is never painted entirely yellow or red from a final-level value without actual phase evidence.
+- Browser storage remains only as a migration and temporary fallback layer; the server record is the shared source of truth.
+
+## Previous v8 fixes
 
 - A successful live-status response is authoritative for the current banner. A lagging open row in Kyiv Digital can no longer keep the alert marked active after an all-clear.
 - The current-status endpoint no longer permits a five-minute stale response; its shared cache is revalidated every 45 seconds.
@@ -29,28 +42,37 @@ Responsive, no-framework dashboard for Kyiv City air-raid alerts. The v8 release
 ```text
 public/
   index.html
-  app-v8.mjs
-  alert-reconciliation-v1.mjs
+  app-v9.mjs
+  alert-reconciliation-v2.mjs
   styles-v7.css
   _headers
   _redirects
 netlify/functions/
   legacy-history.mjs
   air-alerts.mjs
+  collect-alert-phases.mjs
+  lib/
 tests/
   legacy-history.test.mjs
+  phase-collector.test.mjs
+  reconciliation.test.mjs
+package.json
+package-lock.json
 netlify.toml
 .env.example
 ```
 
-No framework, npm dependency or build command is required.
+No frontend framework or build command is required. Netlify installs the declared Functions dependency during deployment.
 
 ## Data flow
 
 ```text
 Browser
   ├─ /api/legacy-history → Netlify Function → Kyiv Digital HTML → compact interval JSON
-  └─ /api/air-alerts     → Netlify Function → configured classification provider
+  └─ /api/air-alerts     → persistent phase state → configured classification provider
+
+Scheduled collector (every minute)
+  └─ classification provider → ETag-safe update → Netlify Blobs
 ```
 
 The browser merges both feeds:
@@ -59,7 +81,7 @@ The browser merges both feeds:
 - the configured provider supplies yellow/red threat classification when available;
 - history without confirmed classification remains blue-grey;
 - all durations and 09:00–18:00 overlaps are calculated from timestamps;
-- the interface refreshes classification every minute and history every five minutes.
+- the interface reads shared classification every minute and history every five minutes.
 
 ## One-time Netlify setup
 
@@ -87,45 +109,47 @@ In Netlify open:
 
 **Project configuration → Environment variables → Add a variable**
 
-Add:
+For yellow/red classification, use a token issued by `alerts.in.ua`:
 
 ```text
-ALERTS_API_TOKEN = <new token>
-ALERTS_PROVIDER = ukraine-alarm-v3
-KYIV_REGION_ID = 31
+ALERTS_IN_UA_TOKEN = <new alerts.in.ua token>
+ALERTS_PROVIDER = auto
 ```
 
 Recommended variable scope: **Functions**. Trigger a production deploy after adding or changing environment variables.
 
 Never put a real token in GitHub, a ZIP, `index.html`, client-side JavaScript, `netlify.toml`, `.env.example`, an issue, or chat.
 
-Provider options:
+The older generic variable remains supported and is auto-detected across both providers:
 
 ```text
-ALERTS_PROVIDER = ukraine-alarm-v3
-ALERTS_PROVIDER = alerts-in-ua
-ALERTS_PROVIDER = auto
+ALERTS_API_TOKEN = <provider token>
 ```
 
-Use a token issued by the selected provider. With `auto`, the function tries alerts.in.ua first and Ukraine Alert API v3 second.
+Optional Ukraine Alert API fallback:
+
+```text
+UKRAINE_ALARM_API_TOKEN = <Ukraine Alert API token>
+KYIV_REGION_ID = 31
+```
+
+The site-wide phase store is provisioned automatically by Netlify Blobs. The `collect-alert-phases` function is scheduled from `netlify.toml` and runs only on the published production deploy.
 
 ## Verification
 
 Run syntax checks and parser tests:
 
 ```text
-node --check public/app-v8.mjs
-node --check public/alert-reconciliation-v1.mjs
-node --check netlify/functions/legacy-history.mjs
-node --check netlify/functions/air-alerts.mjs
-node --test tests/*.test.mjs
+npm run check
+npm test
 ```
 
 After deployment, verify:
 
 - `/api/legacy-history` returns `"ok":true` and an `intervals` array;
 - `/api/air-alerts` returns `"ok":true` after the token is configured;
-- the homepage shows `Live · basic` without classification or `Live · classified` with it.
+- `/api/air-alerts` includes `phaseRecords`, `liveStatusKnown`, and collector health;
+- the homepage shows `Live · basic` without classification or `Live · tracked` with server history.
 
 ## Preview mode
 

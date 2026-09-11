@@ -5,6 +5,9 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+[functions."collect-alert-phases"]
+  schedule = "* * * * *"
+
 [[redirects]]
   from = "/api/legacy-history"
   to = "/.netlify/functions/legacy-history"
@@ -26,12 +29,12 @@
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
 
 [[headers]]
-  for = "/app-v8.mjs"
+  for = "/app-v9.mjs"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
 [[headers]]
-  for = "/alert-reconciliation-v1.mjs"
+  for = "/alert-reconciliation-v2.mjs"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
