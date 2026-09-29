@@ -13,6 +13,15 @@ const COLLECTION_INTERVAL_MS = 45_000;
 let memoryCache = { expiresAt: 0, payload: null };
 
 export default {
+  async scheduled(controller, env) {
+    if (!env.DB || !buildProviderCandidates(env).length) return;
+    await collectAndPersist({
+      store: createD1PhaseStateStore(env.DB),
+      env,
+      nowMs: controller.scheduledTime,
+    });
+  },
+
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (path === '/api/air-alerts') return handleAirAlerts(request, env);
