@@ -123,6 +123,11 @@
             <p>Each block is one alert. Its position shows when it happened; its height shows how long it lasted.</p>
           </div>
           <div class="timeline-controls" aria-label="Timeline controls">
+            <div class="desktop-week-control" role="group" aria-label="Calendar week">
+              <button type="button" id="previousWeekButton" aria-label="Previous week">← Previous week</button>
+              <strong id="timelineWeekLabel" aria-live="polite">Last 7 days</strong>
+              <button type="button" id="nextWeekButton" aria-label="Next week">Next week →</button>
+            </div>
             <div class="segmented-control" role="group" aria-label="Number of days">
               <button type="button" data-range="7">7 days</button>
               <button type="button" data-range="10" class="is-active">10 days</button>
@@ -153,7 +158,7 @@
             <span class="axis-accent" style="top:75%">18:00</span>
             <span style="top:100%">24:00</span>
           </div>
-          <div class="timeline-scroll" id="timelineScroll" tabindex="0" aria-label="Air-raid alert timeline; scroll horizontally for more days">
+          <div class="timeline-scroll" id="timelineScroll" aria-label="Air-raid alert timeline">
             <div class="timeline-grid" id="timelineGrid"></div>
           </div>
         </div>
