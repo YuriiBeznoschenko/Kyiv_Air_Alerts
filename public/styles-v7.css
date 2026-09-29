@@ -1197,22 +1197,27 @@ body.hide-work .alert-work { background: var(--alert) !important; }
 }
 
 
-/* Desktop timeline shows seven days at once; calendar-week navigation replaces horizontal scrolling. */
+/* Desktop weekly paging: one polished control and seven columns with no horizontal scrollbar. */
 @media (min-width:761px) {
   .desktop-week-control {
     display:flex;
     align-items:center;
-    gap:10px;
-    padding:4px;
-    border:1px solid var(--line);
-    border-radius:12px;
-    background:rgba(255,255,255,.72);
+    gap:5px;
+    padding:5px;
+    border:1px solid #e1e5e8;
+    border-radius:14px;
+    background:#f3f5f6;
+    box-shadow:0 2px 8px rgba(23,32,51,.04);
   }
-  .desktop-week-control button {
+  .desktop-week-control .week-nav-button {
+    display:inline-flex;
     min-height:36px;
-    padding:0 11px;
-    border:0;
-    border-radius:9px;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    padding:0 10px;
+    border:1px solid transparent;
+    border-radius:10px;
     color:var(--navy);
     background:transparent;
     font:inherit;
@@ -1220,17 +1225,32 @@ body.hide-work .alert-work { background: var(--alert) !important; }
     font-weight:760;
     white-space:nowrap;
     cursor:pointer;
+    transition:background .16s,border-color .16s,color .16s;
   }
-  .desktop-week-control button:hover:not(:disabled) { background:#f1f3f4; }
-  .desktop-week-control button:disabled { color:var(--muted-2); opacity:.48; cursor:not-allowed; }
+  .desktop-week-control .week-nav-button:hover:not(:disabled) {
+    border-color:#e1e5e8;
+    background:#fff;
+  }
+  .desktop-week-control .week-nav-button > span {
+    color:#7b8792;
+    font-size:19px;
+    font-weight:500;
+    line-height:1;
+  }
+  .desktop-week-control .week-nav-button:disabled {
+    color:#a5adb5;
+    opacity:.55;
+    cursor:not-allowed;
+  }
   .desktop-week-control strong {
-    min-width:142px;
+    min-width:160px;
+    padding:0 7px;
     color:var(--ink);
     font-size:11px;
+    font-weight:780;
     text-align:center;
     white-space:nowrap;
   }
-  .timeline-controls > .segmented-control { display:none; }
   .timeline-scroll { overflow:hidden; padding-bottom:0; }
   .timeline-grid {
     min-width:0;
@@ -1242,5 +1262,4 @@ body.hide-work .alert-work { background: var(--alert) !important; }
 }
 @media (max-width:760px) {
   .desktop-week-control { display:none; }
-  .timeline-controls > .segmented-control { display:flex; }
 }
