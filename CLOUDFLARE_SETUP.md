@@ -1,22 +1,29 @@
 # Cloudflare setup
 
-Cloudflare now serves the static site and runs both API routes through the Worker in `public/_worker.js`. The Worker config also schedules alert collection once per minute.
+Cloudflare must deploy this project as a Worker script with static assets. The entry point is `public/_worker.js`; `wrangler.jsonc` at the repository root points to it.
 
-## 1. Create and bind D1
+## 1. Make Workers Builds deploy the Worker script
 
-1. In Cloudflare, open **Storage & databases → D1 SQL Database** and create a database.
-2. Open **Workers & Pages → kyiv-air-alerts → Settings → Bindings** and add a D1 database binding named `DB`.
-3. Select the database, save, and open its SQL console.
-4. Run the contents of `migrations/0001_create_phase_state.sql`.
+In **Workers & Pages → kyiv-air-alerts → Settings → Build**, check:
 
-The binding name must be exactly `DB`.
+- **Root directory** is the repository root (blank or `/`), where `wrangler.jsonc` lives.
+- **Deploy command** is `npx wrangler deploy`.
 
-## 2. Add the provider token
+Save the settings and trigger/retry a deployment from the production branch. In the deployment logs, confirm Wrangler deploys a Worker script as well as assets. If the Bindings page says the Worker has only static assets, stop here: the build is still ignoring the root Wrangler config.
+
+## 2. Create and bind D1
+
+1. Create a D1 database in **Storage & databases → D1 SQL Database**.
+2. Once the Worker script is deployed, open **Workers & Pages → kyiv-air-alerts → Settings → Bindings → Add binding → D1 database**.
+3. Name the binding `DB` and select the database.
+4. In the database's **Console**, run `migrations/0001_create_phase_state.sql`.
+
+## 3. Add the provider token
 
 In **Workers & Pages → kyiv-air-alerts → Settings → Variables and Secrets**, add a **Secret** named `ALERTS_IN_UA_TOKEN`, paste the alerts.in.ua API token, and save. Redeploy after adding it.
 
-## 3. Verify
+## 4. Verify
 
-After deployment succeeds, open `/api/air-alerts` and `/api/legacy-history` on the site. The first route should return alert data and persistent phase history; the second should return Kyiv Digital history.
+Open `/api/air-alerts` and `/api/legacy-history` on the deployed site. The first route should return alert data and persistent phase history; the second should return Kyiv Digital history.
 
 The scheduled collector runs once per minute on Cloudflare. Netlify is no longer part of the live API path.
