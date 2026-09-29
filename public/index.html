@@ -8,7 +8,7 @@
   <meta name="application-version" content="9" />
   <title>Kyiv Air-Raid Impact</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◉</text></svg>" />
-  <link rel="stylesheet" href="styles-v7.css" />
+  <link rel="stylesheet" href="styles-v7.css?v=week-nav-2" />
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard</a>
@@ -124,14 +124,9 @@
           </div>
           <div class="timeline-controls" aria-label="Timeline controls">
             <div class="desktop-week-control" role="group" aria-label="Calendar week">
-              <button type="button" id="previousWeekButton" aria-label="Previous week">← Previous week</button>
-              <strong id="timelineWeekLabel" aria-live="polite">Last 7 days</strong>
-              <button type="button" id="nextWeekButton" aria-label="Next week">Next week →</button>
-            </div>
-            <div class="segmented-control" role="group" aria-label="Number of days">
-              <button type="button" data-range="7">7 days</button>
-              <button type="button" data-range="10" class="is-active">10 days</button>
-              <button type="button" data-range="14">14 days</button>
+              <button class="week-nav-button" type="button" id="previousWeekButton" aria-label="Previous week"><span aria-hidden="true">‹</span> Previous</button>
+              <strong id="timelineWeekLabel" aria-live="polite">W40 · Last 7 days</strong>
+              <button class="week-nav-button" type="button" id="nextWeekButton" aria-label="Next week">Next <span aria-hidden="true">›</span></button>
             </div>
             <label class="toggle-control">
               <input type="checkbox" id="workToggle" checked />
@@ -281,6 +276,6 @@
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="app-v9.mjs"></script>
+  <script type="module" src="app-v9.mjs?v=week-nav-2"></script>
 </body>
 </html>
