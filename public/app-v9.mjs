@@ -51,6 +51,7 @@ import {
     alerts: [],
     days: [],
     range: 10,
+    timelineWeekStartMs: null,
     selectedKey: null,
     sourceMode: 'loading',
     fetchedAt: null,
@@ -93,7 +94,8 @@ import {
       'baselinePeriodMeta','baselineRangeTrigger','baselineModal','baselineClose','baselineCancel','baselineApply',
       'baselineDraftStart','baselineDraftEnd','baselineDraftDays','calendarPrev','calendarNext','calendarMonthLabel',
       'calendarGrid','timelineGrid','timelineScroll','mobileTimeline','workToggle','detailTitle','detailSummary',
-      'detailPills','detailList','tooltip','toast','dataSourcePrimary','dataSourceSecondary','dataSourceLink'
+      'detailPills','detailList','tooltip','toast','dataSourcePrimary','dataSourceSecondary','dataSourceLink',
+      'previousWeekButton','nextWeekButton','timelineWeekLabel'
     ].forEach(id => els[id] = document.getElementById(id));
   }
 
@@ -105,6 +107,9 @@ import {
         renderTimelines();
       });
     });
+
+    els.previousWeekButton.addEventListener('click', () => shiftTimelineWeek(-1));
+    els.nextWeekButton.addEventListener('click', () => shiftTimelineWeek(1));
 
     els.workToggle.addEventListener('change', () => document.body.classList.toggle('hide-work', !els.workToggle.checked));
     els.refreshButton.addEventListener('click', () => loadData({ force: true }));
@@ -1021,6 +1026,17 @@ import {
 
   function overlapMinutes(a0,a1,b0,b1) { return Math.max(0, Math.min(a1,b1) - Math.max(a0,b0)); }
   function dayStart(ms) { const d = new Date(ms); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
+  function isoWeekStart(ms) {
+    const dayMs = dayStart(ms);
+    const weekday = new Date(dayMs).getUTCDay();
+    return dayMs - ((weekday + 6) % 7) * DAY;
+  }
+  function isoWeekNumber(ms) {
+    const weekStart = isoWeekStart(ms);
+    const thursday = new Date(weekStart + 3 * DAY);
+    const firstWeek = isoWeekStart(Date.UTC(thursday.getUTCFullYear(), 0, 4));
+    return 1 + Math.round((weekStart - firstWeek) / (7 * DAY));
+  }
   function dateKey(ms) { const d = new Date(ms); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`; }
   function pad(n) { return String(n).padStart(2,'0'); }
   function inputDate(ms) { return dateKey(ms); }
@@ -1208,16 +1224,47 @@ import {
   }
 
   function renderTimelines() {
-    const shown = state.days.slice(-state.range);
+    const mobileDays = state.days.slice(-state.range);
+    const today = dayStart(getKyivNow());
+    const currentWeekStart = isoWeekStart(today);
+    const desktopStart = state.timelineWeekStartMs ?? (today - 6 * DAY);
+    const desktopEnd = state.timelineWeekStartMs == null ? today : desktopStart + 6 * DAY;
+    const daysByKey = new Map(state.days.map(day => [day.key, day]));
+    const desktopDays = [];
+
+    for (let dayMs = desktopStart; dayMs <= desktopEnd; dayMs += DAY) {
+      desktopDays.push(daysByKey.get(dateKey(dayMs)) || emptyDay(dayMs));
+    }
+
     els.timelineGrid.innerHTML = '';
     els.mobileTimeline.innerHTML = '';
+    desktopDays.forEach(day => els.timelineGrid.appendChild(createDesktopDay(day)));
+    [...mobileDays].reverse().forEach(day => els.mobileTimeline.appendChild(createMobileDay(day)));
 
-    // Desktop reads chronologically from left to right.
-    shown.forEach(day => els.timelineGrid.appendChild(createDesktopDay(day)));
-    // Mobile is newest-first, so today is the first card users see.
-    [...shown].reverse().forEach(day => els.mobileTimeline.appendChild(createMobileDay(day)));
+    const weeklyView = state.timelineWeekStartMs != null;
+    els.timelineWeekLabel.textContent = weeklyView
+      ? `W${String(isoWeekNumber(desktopStart)).padStart(2, '0')} · ${formatDayMonth(desktopStart)} – ${formatDayMonth(desktopStart + 6 * DAY)}`
+      : 'Last 7 days';
+    const firstDay = state.days[0]?.dayMs ?? today;
+    const firstWeekStart = isoWeekStart(firstDay);
+    const earliestFullWeek = firstDay === firstWeekStart ? firstWeekStart : firstWeekStart + 7 * DAY;
+    const visibleWeekStart = state.timelineWeekStartMs ?? currentWeekStart;
+    els.previousWeekButton.disabled = visibleWeekStart - 7 * DAY < earliestFullWeek;
+    els.nextWeekButton.disabled = visibleWeekStart >= currentWeekStart;
+    els.timelineScroll.scrollLeft = 0;
+  }
 
-    requestAnimationFrame(() => { els.timelineScroll.scrollLeft = els.timelineScroll.scrollWidth; });
+  function shiftTimelineWeek(direction) {
+    const currentWeekStart = isoWeekStart(getKyivNow());
+    if (state.timelineWeekStartMs == null) {
+      state.timelineWeekStartMs = direction < 0 ? currentWeekStart - 7 * DAY : currentWeekStart;
+    } else {
+      state.timelineWeekStartMs = Math.min(currentWeekStart, state.timelineWeekStartMs + direction * 7 * DAY);
+      if (state.timelineWeekStartMs === currentWeekStart && direction < 0) {
+        state.timelineWeekStartMs = currentWeekStart - 7 * DAY;
+      }
+    }
+    renderTimelines();
   }
 
   function createDesktopDay(day) {
