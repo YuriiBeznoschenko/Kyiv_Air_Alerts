@@ -1244,7 +1244,7 @@ import {
     const weeklyView = state.timelineWeekStartMs != null;
     els.timelineWeekLabel.textContent = weeklyView
       ? `W${String(isoWeekNumber(desktopStart)).padStart(2, '0')} · ${formatDayMonth(desktopStart)} – ${formatDayMonth(desktopStart + 6 * DAY)}`
-      : 'Last 7 days';
+      : `W${String(isoWeekNumber(currentWeekStart)).padStart(2, '0')} · Last 7 days`;
     const firstDay = state.days[0]?.dayMs ?? today;
     const firstWeekStart = isoWeekStart(firstDay);
     const earliestFullWeek = firstDay === firstWeekStart ? firstWeekStart : firstWeekStart + 7 * DAY;
