@@ -1250,7 +1250,7 @@ import {
     const earliestFullWeek = firstDay === firstWeekStart ? firstWeekStart : firstWeekStart + 7 * DAY;
     const visibleWeekStart = state.timelineWeekStartMs ?? currentWeekStart;
     els.previousWeekButton.disabled = visibleWeekStart - 7 * DAY < earliestFullWeek;
-    els.nextWeekButton.disabled = visibleWeekStart >= currentWeekStart;
+    els.nextWeekButton.disabled = state.timelineWeekStartMs != null && visibleWeekStart >= currentWeekStart;
     els.timelineScroll.scrollLeft = 0;
   }
 
