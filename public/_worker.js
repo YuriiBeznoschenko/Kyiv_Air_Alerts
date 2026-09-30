@@ -7,6 +7,7 @@ import {
 } from './_worker/phase-collector.mjs';
 import { createD1PhaseStateStore } from './_worker/d1-phase-store.mjs';
 import legacyHistory from './_worker/legacy-history.mjs';
+import { backfillHistoricalClassifications } from './_worker/history-backfill.mjs';
 
 const CACHE_TTL_MS = 45_000;
 const COLLECTION_INTERVAL_MS = 45_000;
@@ -14,9 +15,17 @@ let memoryCache = { expiresAt: 0, payload: null };
 
 export default {
   async scheduled(controller, env) {
-    if (!env.DB || !buildProviderCandidates(env).length) return;
-    await collectAndPersist({
-      store: createD1PhaseStateStore(env.DB),
+    if (!env.DB) return;
+    const store = createD1PhaseStateStore(env.DB);
+    if (buildProviderCandidates(env).length) {
+      await collectAndPersist({
+        store,
+        env,
+        nowMs: controller.scheduledTime,
+      });
+    }
+    await backfillHistoricalClassifications({
+      store,
       env,
       nowMs: controller.scheduledTime,
     });
