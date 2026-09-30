@@ -100,10 +100,18 @@ export function applyObservedPhaseRecords(alertsInput, recordsInput) {
   const records = normalizeObservedPhaseRecords(recordsInput);
   return (Array.isArray(alertsInput) ? alertsInput : []).map(alert => {
     const next = cloneAlert(alert);
-    const record = findPhaseRecord(records, next);
-    if (!record) return next;
-
-    const phases = materializeRecordPhases(record, next);
+    const exactRecord = findPhaseRecord(records, next);
+    // Kyiv Digital can group several classified incidents into one interval.
+    // Project every overlapping record onto that interval, not just a row
+    // whose start happens to match. Keep uncovered time explicitly unknown.
+    const overlapping = records.filter(record => record.phases.some(phase =>
+      phase.startMs < next.endMs
+      && (phase.endMs ?? next.endMs) > next.startMs));
+    const candidates = overlapping.flatMap(record =>
+      materializeRecordPhases(record, next, record === exactRecord && overlapping.length === 1)
+        .filter(phase => KNOWN_LEVELS.has(phase.level))
+        .map(phase => ({ ...phase, recordStartMs: record.startMs, updatedAtMs: record.updatedAtMs })));
+    const phases = combineClassificationPhases(next, candidates);
     if (!phases.some(phase => KNOWN_LEVELS.has(phase.level))) return next;
 
     next.phases = phases;
@@ -363,14 +371,14 @@ function closeRecord(record, endMs, provisional) {
   record.provisionalEnd = provisional;
 }
 
-function materializeRecordPhases(record, alert) {
+function materializeRecordPhases(record, alert, extendProvisionalEnd = true) {
   const alertStart = Number(alert.startMs);
   const alertEnd = Number(alert.endMs);
   const phases = record.phases.map((phase, index) => {
     const isLast = index === record.phases.length - 1;
     let endMs = finiteNumber(phase.endMs);
     if (endMs == null) endMs = alertEnd;
-    if (!alert.ongoing && isLast && record.provisionalEnd) endMs = alertEnd;
+    if (extendProvisionalEnd && !alert.ongoing && isLast && record.provisionalEnd) endMs = alertEnd;
     return {
       ...phase,
       startMs: Math.max(alertStart, phase.startMs),
@@ -379,6 +387,34 @@ function materializeRecordPhases(record, alert) {
     };
   }).filter(phase => phase.endMs > phase.startMs);
   return phases;
+}
+
+function combineClassificationPhases(alert, candidates) {
+  const saved = clipPhases(alert.phases, alert.startMs, alert.endMs, alert.ongoing)
+    .filter(phase => KNOWN_LEVELS.has(phase.level));
+  const boundaries = [...new Set([alert.startMs, alert.endMs,
+    ...[...candidates, ...saved].flatMap(phase => [phase.startMs, phase.endMs])])]
+    .sort((a, b) => a - b);
+  const result = [];
+  let previousWinner;
+  for (let index = 0; index < boundaries.length - 1; index++) {
+    const startMs = boundaries[index];
+    const endMs = boundaries[index + 1];
+    const covers = phase => phase.startMs <= startMs && phase.endMs >= endMs;
+    // If records overlap, the later incident takes over at its own start.
+    const winner = candidates.filter(covers).sort((a, b) =>
+      b.recordStartMs - a.recordStartMs || b.updatedAtMs - a.updatedAtMs)[0]
+      || saved.find(covers) || null;
+    const previous = result.at(-1);
+    if (previous && winner === previousWinner) {
+      previous.endMs = endMs;
+    } else {
+      result.push({ startMs, endMs, level: winner?.level || 'unknown',
+        threats: cloneThreats(winner?.threats), sourceMessage: winner?.sourceMessage || '' });
+    }
+    previousWinner = winner;
+  }
+  return result;
 }
 
 function clipPhases(value, alertStart, alertEnd, ongoing) {
