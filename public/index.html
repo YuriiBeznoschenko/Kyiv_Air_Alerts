@@ -4,11 +4,44 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f4f3ef" />
+  <script>
+    (() => {
+      const key = 'kyiv-air-alerts-theme';
+      const saved = localStorage.getItem(key);
+      const theme = saved === 'dark' || saved === 'light'
+        ? saved
+        : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#11120f' : '#f4f3ef');
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('themeToggle');
+        if (!button) return;
+
+        const sync = () => {
+          const dark = document.documentElement.dataset.theme === 'dark';
+          button.setAttribute('aria-pressed', String(dark));
+          button.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+          button.title = dark ? 'Light mode' : 'Dark mode';
+        };
+
+        button.addEventListener('click', () => {
+          const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+          document.documentElement.dataset.theme = next;
+          localStorage.setItem(key, next);
+          document.querySelector('meta[name="theme-color"]')?.setAttribute('content', next === 'dark' ? '#11120f' : '#f4f3ef');
+          sync();
+        });
+
+        sync();
+      });
+    })();
+  </script>
   <meta name="description" content="Kyiv city air-raid alert impact dashboard with live threat classification and historical context." />
   <meta name="application-version" content="9" />
   <title>Kyiv Air-Raid Impact</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◉</text></svg>" />
-  <link rel="stylesheet" href="styles-v7.css?v=mobile-week-sync-1" />
+  <link rel="stylesheet" href="styles-v7.css?v=mobile-theme-toggle-1" />
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard</a>
@@ -33,6 +66,11 @@
           <span id="feedLabel">Connecting…</span>
         </div>
         <span class="updated-label" id="updatedLabel">Waiting for data</span>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
+          <span class="theme-toggle-icon theme-toggle-sun" aria-hidden="true">☀️</span>
+          <span class="theme-toggle-icon theme-toggle-moon" aria-hidden="true">🌙</span>
+          <span class="theme-toggle-thumb" aria-hidden="true"></span>
+        </button>
         <button class="icon-button" id="refreshButton" type="button" aria-label="Refresh data">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 8.3A7 7 0 0 1 18.4 7M17.9 15.7A7 7 0 0 1 5.6 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -298,7 +336,7 @@
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="app-v9.mjs?v=mobile-week-sync-1"></script>
+  <script type="module" src="app-v9.mjs?v=mobile-theme-toggle-1"></script>
 </body>
 </html>
 
