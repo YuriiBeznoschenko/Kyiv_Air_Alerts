@@ -1296,7 +1296,13 @@ body.hide-work .alert-work { background: var(--alert) !important; }
   .work-hours-layout { grid-template-columns:34px minmax(0,1fr); gap:8px; }
   .desktop-work-hours { display:none; }
   .mobile-work-hours { display:grid; }
-  .work-hours-mobile-scroll { overflow-x:auto; padding-bottom:10px; }
+  .work-hours-mobile-scroll { min-width:0; padding:0 8px 10px 0; }
+  .mobile-work-hours .work-hours-plot { width:100%; min-width:0; }
+  .mobile-work-hours .work-hours-dates { gap:2px; font-size:11px; }
+  .work-hours-svg.is-compact .work-hours-point text { font-size:10px; }
+  .work-hours-svg.is-compact .work-hours-point { cursor:pointer; }
+  .work-hours-point.is-selected circle { fill:var(--navy); stroke-width:4; }
+  .work-hours-selection { margin:12px 4px 0; min-height:34px; color:var(--muted); font-size:11px; line-height:1.5; }
 }
 
 /* Keep each threat hue; darken only its overlap with the selected work window. */

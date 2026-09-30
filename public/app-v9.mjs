@@ -1267,9 +1267,28 @@ import {
     if (!visible) return;
     const desktop = state.workHoursDesktopDays;
     const mobile = state.workHoursMobileDays;
-    els.mobileWorkHoursPlot.style.minWidth = `${Math.max(mobile.length, 1) * 78}px`;
+    els.mobileWorkHoursPlot.style.minWidth = '0';
     els.desktopWorkHoursPlot.innerHTML = buildWorkHoursChart(desktop, els.desktopWorkHoursPlot.clientWidth || 1000);
-    els.mobileWorkHoursPlot.innerHTML = buildWorkHoursChart(mobile, els.mobileWorkHoursPlot.clientWidth || Math.max(mobile.length, 1) * 78);
+    els.mobileWorkHoursPlot.innerHTML = buildWorkHoursChart(mobile, els.mobileWorkHoursPlot.clientWidth || 280, true);
+    const showMobileValue = event => {
+      const point = event.target.closest('[data-work-day]');
+      if (!point) return;
+      const day = mobile[Number(point.dataset.workDay)];
+      if (!day) return;
+      els.mobileWorkHoursPlot.querySelectorAll('[data-work-day]').forEach(item => {
+        const selected = item === point;
+        item.classList.toggle('is-selected', selected);
+        item.setAttribute('aria-pressed', String(selected));
+      });
+      els.mobileWorkHoursPlot.querySelector('.work-hours-selection').textContent =
+        `${formatDayMonth(day.dayMs)} · ${formatDuration(day.workMinutes)} during 09:00–18:00${day.dayMs === dayStart(getKyivNow()) ? ' · today so far' : ''}`;
+    };
+    els.mobileWorkHoursPlot.onclick = showMobileValue;
+    els.mobileWorkHoursPlot.onkeydown = event => {
+      if (!event.target.closest('[data-work-day]') || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      showMobileValue(event);
+    };
     const shownDays = window.matchMedia('(max-width:760px)').matches ? mobile : desktop;
     const exceedsScale = shownDays.some(day => day.workMinutes > 8 * 60);
     els.workHoursNote.textContent = exceedsScale
@@ -1277,19 +1296,20 @@ import {
       : 'Hours per day · today updates live.';
   }
 
-  function buildWorkHoursChart(days, width) {
+  function buildWorkHoursChart(days, width, compact = false) {
     const height = 260;
     const top = 30;
     const bottom = 230;
     const today = dayStart(getKyivNow());
     const count = Math.max(days.length, 1);
-    const gap = 10;
+    const gap = compact ? 2 : 10;
     const columnWidth = (width - gap * (count - 1)) / count;
     const points = days.map((day, index) => ({
       day,
       x: index * (columnWidth + gap) + columnWidth / 2,
       y: bottom - Math.min(Math.max(day.workMinutes, 0) / 60, 8) / 8 * (bottom - top),
       future: day.dayMs > today,
+      index,
     }));
     const grid = [0, 2, 4, 6, 8].map(hours => {
       const y = bottom - hours / 8 * (bottom - top);
@@ -1302,14 +1322,18 @@ import {
       previous = point;
       return command;
     }).filter(Boolean).join(' ');
-    const markers = points.filter(point => !point.future).map(({ day, x, y }) => {
+    const markers = points.filter(point => !point.future).map(({ day, x, y, index }) => {
       const exceedsScale = day.workMinutes > 480;
-      const label = `${exceedsScale ? '↑ ' : ''}${formatCompact(day.workMinutes)}`;
+      const label = `${exceedsScale ? '↑ ' : ''}${compact ? (Math.max(day.workMinutes, 0) / 60).toFixed(1) : formatCompact(day.workMinutes)}`;
       const title = `${formatDayMonth(day.dayMs)}: ${formatDuration(day.workMinutes)} of alerts during 09:00–18:00${day.dayMs === today ? ' (today so far)' : ''}${exceedsScale ? '; above the 8-hour chart scale' : ''}`;
-      return `<g class="work-hours-point" tabindex="0" role="img" aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="4.5" /><text x="${x.toFixed(2)}" y="${(y - 12).toFixed(2)}" text-anchor="middle">${escapeHtml(label)}</text></g>`;
+      const interaction = compact ? `role="button" aria-pressed="false" data-work-day="${index}"` : 'role="img"';
+      const hitArea = compact ? `<rect class="work-hours-hit-area" x="${(x - columnWidth / 2).toFixed(2)}" y="0" width="${columnWidth.toFixed(2)}" height="${height}" fill="transparent" />` : '';
+      return `<g class="work-hours-point" tabindex="0" ${interaction} aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title>${hitArea}<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="4.5" /><text x="${x.toFixed(2)}" y="${(y - 12).toFixed(2)}" text-anchor="middle">${escapeHtml(label)}</text></g>`;
     }).join('');
-    const dates = days.map(day => `<span>${escapeHtml(formatDayMonth(day.dayMs))}</span>`).join('');
-    return `<svg class="work-hours-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-label="Daily alert hours during 09:00–18:00">${grid}<path class="work-hours-line" d="${line}" />${markers}</svg><div class="work-hours-dates" style="grid-template-columns:repeat(${count},minmax(0,1fr))">${dates}</div>`;
+    const dates = days.map(day => `<span title="${escapeHtml(formatDayMonth(day.dayMs))}">${escapeHtml(compact ? String(new Date(day.dayMs).getUTCDate()) : formatDayMonth(day.dayMs))}</span>`).join('');
+    const period = days.length ? `${formatDayMonth(days[0].dayMs)} – ${formatDayMonth(days.at(-1).dayMs)} · ` : '';
+    const selection = compact ? `<p class="work-hours-selection" aria-live="polite">${escapeHtml(period)}Tap a day for the exact alert time.</p>` : '';
+    return `<svg class="work-hours-svg${compact ? ' is-compact' : ''}" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-label="Daily alert hours during 09:00–18:00">${grid}<path class="work-hours-line" d="${line}" />${markers}</svg><div class="work-hours-dates" style="grid-template-columns:repeat(${count},minmax(0,1fr))">${dates}</div>${selection}`;
   }
 
   function shiftTimelineWeek(direction) {
@@ -1641,4 +1665,3 @@ import {
   function formatDateShort(ms) { return new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',timeZone:'UTC'}).format(new Date(ms)); }
   function formatDateLong(ms) { return new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'}).format(new Date(ms)); }
 })();
-
