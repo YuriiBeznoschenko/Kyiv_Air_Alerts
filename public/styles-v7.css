@@ -1296,3 +1296,9 @@ body.hide-work .alert-work { background: var(--alert) !important; }
   .mobile-work-hours { display:grid; }
   .work-hours-mobile-scroll { overflow-x:auto; padding-bottom:10px; }
 }
+
+/* Keep each threat hue; darken only its overlap with the selected work window. */
+body:not(.hide-work) .alert-block > .threat-phase.is-work-window,
+body:not(.hide-work) .mobile-alert-shape > .threat-phase.is-work-window {
+  filter: brightness(.84);
+}

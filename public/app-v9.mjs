@@ -1363,7 +1363,7 @@ import {
     button.style.top = `${top}%`;
     button.style.height = `${height}%`;
     button.setAttribute('aria-label', tooltipPlain(seg, index));
-    appendPhaseSpans(button, seg, 'vertical');
+    appendPhaseSpans(button, seg, 'vertical', true);
 
     if (seg.durationMinutes >= 45) {
       const label = document.createElement('span');
@@ -1387,21 +1387,39 @@ import {
     return button;
   }
 
-  function appendPhaseSpans(container, seg, orientation) {
+  function appendPhaseSpans(container, seg, orientation, highlightWork = false) {
     const totalMs = Math.max(MINUTE, seg.endMs - seg.startMs);
-    (seg.phases?.length ? seg.phases : [{ startMs: seg.startMs, endMs: seg.endMs, level: 'unknown' }]).forEach(phase => {
-      const startPct = Math.max(0, (phase.startMs - seg.startMs) / totalMs * 100);
-      const sizePct = Math.max(.5, (phase.endMs - phase.startMs) / totalMs * 100);
-      const span = document.createElement('span');
-      span.className = `threat-phase level-${phase.level || 'unknown'}`;
-      if (orientation === 'vertical') {
-        span.style.top = `${startPct}%`;
-        span.style.height = `${Math.min(100 - startPct, sizePct)}%`;
-      } else {
-        span.style.left = `${startPct}%`;
-        span.style.width = `${Math.min(100 - startPct, sizePct)}%`;
+    const workStartMs = seg.startMs + (WORK_START - seg.startMinute) * MINUTE;
+    const workEndMs = seg.startMs + (WORK_END - seg.startMinute) * MINUTE;
+    const phases = seg.phases?.length ? seg.phases : [{ startMs: seg.startMs, endMs: seg.endMs, level: 'unknown' }];
+    phases.forEach(phase => {
+      const phaseStart = Math.max(seg.startMs, phase.startMs);
+      const phaseEnd = Math.min(seg.endMs, phase.endMs);
+      if (phaseEnd <= phaseStart) return;
+      const cuts = [phaseStart, phaseEnd];
+      if (highlightWork) {
+        [workStartMs, workEndMs].forEach(boundary => {
+          if (boundary > phaseStart && boundary < phaseEnd) cuts.push(boundary);
+        });
       }
-      container.appendChild(span);
+      cuts.sort((a, b) => a - b);
+      for (let i = 0; i < cuts.length - 1; i++) {
+        const pieceStart = cuts[i];
+        const pieceEnd = cuts[i + 1];
+        const inWorkWindow = highlightWork && pieceStart >= workStartMs && pieceEnd <= workEndMs;
+        const startPct = (pieceStart - seg.startMs) / totalMs * 100;
+        const sizePct = (pieceEnd - pieceStart) / totalMs * 100;
+        const span = document.createElement('span');
+        span.className = `threat-phase level-${phase.level || 'unknown'}${inWorkWindow ? ' is-work-window' : ''}`;
+        if (orientation === 'vertical') {
+          span.style.top = `${startPct}%`;
+          span.style.height = `${sizePct}%`;
+        } else {
+          span.style.left = `${startPct}%`;
+          span.style.width = `${sizePct}%`;
+        }
+        container.appendChild(span);
+      }
     });
   }
 
@@ -1433,7 +1451,7 @@ import {
       block.style.left = `${seg.startMinute / 1440 * 100}%`;
       block.style.width = `${Math.max(seg.durationMinutes / 1440 * 100, .7)}%`;
       block.setAttribute('aria-hidden', 'true');
-      appendPhaseSpans(block, seg, 'horizontal');
+      appendPhaseSpans(block, seg, 'horizontal', true);
       if (seg.ongoing) {
         const pulse = document.createElement('span');
         pulse.className = 'ongoing-marker';
