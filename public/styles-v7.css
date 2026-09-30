@@ -1304,3 +1304,157 @@ body:not(.hide-work) .alert-block > .threat-phase.is-work-window,
 body:not(.hide-work) .mobile-alert-shape > .threat-phase.is-work-window {
   filter: brightness(.84);
 }
+
+
+/* Mobile sun/moon theme switch */
+.theme-toggle {
+  display: none;
+  position: relative;
+  width: 70px;
+  height: 38px;
+  flex: 0 0 70px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--surface);
+  cursor: pointer;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 2px 10px rgba(23,32,51,.05);
+}
+.theme-toggle-icon {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  font-size: 15px;
+  line-height: 1;
+  pointer-events: none;
+  transition: opacity .2s, filter .2s;
+}
+.theme-toggle-sun { left: 4px; }
+.theme-toggle-moon { right: 4px; }
+.theme-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(23,32,51,.18);
+  transition: transform .22s ease, background .22s ease;
+}
+html[data-theme="dark"] .theme-toggle-thumb {
+  transform: translateX(32px);
+  background: #2a2c29;
+}
+html[data-theme="light"] .theme-toggle-moon,
+html[data-theme="dark"] .theme-toggle-sun {
+  opacity: .48;
+  filter: grayscale(.45);
+}
+
+html[data-theme="dark"] {
+  --bg: #11120f;
+  --surface: #1b1c19;
+  --surface-soft: #171815;
+  --ink: #eef0f5;
+  --muted: #a9afbd;
+  --muted-2: #7f8795;
+  --line: #3d4148;
+  --line-soft: #292c31;
+  --navy: #9fc6e0;
+  --alert: #79a8c2;
+  --alert-dark: #a8ccdf;
+  --work: #df916b;
+  --work-soft: #38251c;
+  --work-window-bg: #2d2721;
+  --work-window-edge: #66584c;
+  --active: #dc7973;
+  --active-soft: #3b2321;
+  --calendar-red: #dc7a76;
+  --calendar-red-soft: #392322;
+  --safe: #8bc3a4;
+  --safe-soft: #18271f;
+  --shadow: 0 24px 80px rgba(0,0,0,.28);
+  --threat-yellow-deep: #efc95f;
+  --threat-yellow-soft: #302917;
+  --threat-red-deep: #ef8e88;
+  --threat-red-soft: #35201f;
+  --threat-unknown-deep: #acd0e4;
+  --threat-unknown-soft: #1d2b33;
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] .site-header {
+  border-bottom-color: rgba(61,65,72,.78);
+  background: rgba(17,18,15,.90);
+}
+html[data-theme="dark"] .brand-mark {
+  color: #11120f;
+  background: #eef0f5;
+  box-shadow: 0 8px 24px rgba(0,0,0,.22);
+}
+html[data-theme="dark"] .feed-chip,
+html[data-theme="dark"] .icon-button,
+html[data-theme="dark"] .theme-toggle,
+html[data-theme="dark"] .kpi-card,
+html[data-theme="dark"] .detail-card,
+html[data-theme="dark"] .baseline-strip,
+html[data-theme="dark"] .mobile-day-card,
+html[data-theme="dark"] .calendar-card,
+html[data-theme="dark"] .date-range-sheet {
+  border-color: var(--line);
+}
+html[data-theme="dark"] .threat-chip {
+  background: rgba(27,28,25,.82);
+}
+html[data-theme="dark"] .icon-button:hover {
+  border-color: #5b616a;
+  background: #22231f;
+}
+html[data-theme="dark"] .desktop-week-control {
+  border-color: var(--line);
+  background: #20211e;
+}
+html[data-theme="dark"] .desktop-week-control .week-nav-button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: #292a26;
+}
+html[data-theme="dark"] .tooltip {
+  color: #eef0f5;
+  background: #10110f;
+}
+html[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg,#20211e,#2b2d29,#20211e);
+}
+
+@media (max-width: 760px) {
+  .theme-toggle { display: inline-block; }
+
+  .header-actions {
+    gap: 8px;
+  }
+
+  .theme-toggle {
+    width: 66px;
+    flex-basis: 66px;
+    height: 38px;
+  }
+
+  .theme-toggle-thumb {
+    width: 30px;
+    height: 30px;
+  }
+
+  html[data-theme="dark"] .theme-toggle-thumb {
+    transform: translateX(28px);
+  }
+}
