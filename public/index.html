@@ -8,7 +8,7 @@
   <meta name="application-version" content="9" />
   <title>Kyiv Air-Raid Impact</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◉</text></svg>" />
-  <link rel="stylesheet" href="styles-v7.css?v=week-nav-2" />
+  <link rel="stylesheet" href="styles-v7.css?v=work-hours-chart-1" />
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard</a>
@@ -128,11 +128,18 @@
               <strong id="timelineWeekLabel" aria-live="polite">W40 · Last 7 days</strong>
               <button class="week-nav-button" type="button" id="nextWeekButton" aria-label="Next week">Next <span aria-hidden="true">›</span></button>
             </div>
-            <label class="toggle-control">
-              <input type="checkbox" id="workToggle" checked />
-              <span class="toggle-ui" aria-hidden="true"></span>
-              <span>Highlight 09:00–18:00</span>
-            </label>
+            <div class="timeline-toggle-stack">
+              <label class="toggle-control">
+                <input type="checkbox" id="workToggle" checked />
+                <span class="toggle-ui" aria-hidden="true"></span>
+                <span>Highlight 09:00–18:00</span>
+              </label>
+              <label class="toggle-control">
+                <input type="checkbox" id="workHoursToggle" aria-controls="workHoursFrame" />
+                <span class="toggle-ui" aria-hidden="true"></span>
+                <span>Highlight W/H Charts</span>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -159,6 +166,21 @@
         </div>
 
         <div class="mobile-timeline" id="mobileTimeline"></div>
+
+        <section class="work-hours-frame" id="workHoursFrame" aria-labelledby="workHoursTitle" hidden>
+          <div class="work-hours-heading">
+            <div><span class="section-kicker">WORK HOURS</span><h3 id="workHoursTitle">Alert hours · 09:00–18:00</h3></div>
+            <p id="workHoursNote">Hours per day · today updates live.</p>
+          </div>
+          <div class="work-hours-layout desktop-work-hours">
+            <div class="work-hours-axis" aria-hidden="true"><span style="top:30px">8 h</span><span style="top:80px">6 h</span><span style="top:130px">4 h</span><span style="top:180px">2 h</span><span style="top:230px">0 h</span></div>
+            <div class="work-hours-plot" id="desktopWorkHoursPlot"></div>
+          </div>
+          <div class="work-hours-layout mobile-work-hours">
+            <div class="work-hours-axis" aria-hidden="true"><span style="top:30px">8 h</span><span style="top:80px">6 h</span><span style="top:130px">4 h</span><span style="top:180px">2 h</span><span style="top:230px">0 h</span></div>
+            <div class="work-hours-mobile-scroll"><div class="work-hours-plot" id="mobileWorkHoursPlot"></div></div>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -276,6 +298,7 @@
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="app-v9.mjs?v=week-nav-2"></script>
+  <script type="module" src="app-v9.mjs?v=work-hours-chart-1"></script>
 </body>
 </html>
+

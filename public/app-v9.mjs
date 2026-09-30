@@ -53,6 +53,8 @@ import {
     range: 10,
     timelineWeekStartMs: null,
     selectedKey: null,
+    workHoursDesktopDays: [],
+    workHoursMobileDays: [],
     sourceMode: 'loading',
     fetchedAt: null,
     providerName: '',
@@ -95,7 +97,8 @@ import {
       'baselineDraftStart','baselineDraftEnd','baselineDraftDays','calendarPrev','calendarNext','calendarMonthLabel',
       'calendarGrid','timelineGrid','timelineScroll','mobileTimeline','workToggle','detailTitle','detailSummary',
       'detailPills','detailList','tooltip','toast','dataSourcePrimary','dataSourceSecondary','dataSourceLink',
-      'previousWeekButton','nextWeekButton','timelineWeekLabel'
+      'previousWeekButton','nextWeekButton','timelineWeekLabel',
+      'workHoursToggle','workHoursFrame','workHoursNote','desktopWorkHoursPlot','mobileWorkHoursPlot'
     ].forEach(id => els[id] = document.getElementById(id));
   }
 
@@ -112,6 +115,8 @@ import {
     els.nextWeekButton.addEventListener('click', () => shiftTimelineWeek(1));
 
     els.workToggle.addEventListener('change', () => document.body.classList.toggle('hide-work', !els.workToggle.checked));
+    els.workHoursToggle.addEventListener('change', renderWorkHoursCharts);
+    window.addEventListener('resize', renderWorkHoursCharts);
     els.refreshButton.addEventListener('click', () => loadData({ force: true }));
     els.baselineRangeTrigger.addEventListener('click', openBaselineModal);
     document.querySelectorAll('[data-baseline-close]').forEach(control => control.addEventListener('click', closeBaselineModal));
@@ -1252,6 +1257,60 @@ import {
     els.previousWeekButton.disabled = visibleWeekStart - 7 * DAY < earliestFullWeek;
     els.nextWeekButton.disabled = state.timelineWeekStartMs != null && visibleWeekStart >= currentWeekStart;
     els.timelineScroll.scrollLeft = 0;
+    state.workHoursDesktopDays = desktopDays;
+    state.workHoursMobileDays = [...mobileDays].reverse();
+    renderWorkHoursCharts();
+  }
+
+  function renderWorkHoursCharts() {
+    const visible = els.workHoursToggle.checked;
+    els.workHoursFrame.hidden = !visible;
+    if (!visible) return;
+    const desktop = state.workHoursDesktopDays;
+    const mobile = state.workHoursMobileDays;
+    els.mobileWorkHoursPlot.style.minWidth = `${Math.max(mobile.length, 1) * 78}px`;
+    els.desktopWorkHoursPlot.innerHTML = buildWorkHoursChart(desktop, els.desktopWorkHoursPlot.clientWidth || 1000);
+    els.mobileWorkHoursPlot.innerHTML = buildWorkHoursChart(mobile, els.mobileWorkHoursPlot.clientWidth || Math.max(mobile.length, 1) * 78);
+    const shownDays = window.matchMedia('(max-width:760px)').matches ? mobile : desktop;
+    const exceedsScale = shownDays.some(day => day.workMinutes > 8 * 60);
+    els.workHoursNote.textContent = exceedsScale
+      ? 'Hours per day · ↑ exceeds 8 h; labels show actual time. Today updates live.'
+      : 'Hours per day · today updates live.';
+  }
+
+  function buildWorkHoursChart(days, width) {
+    const height = 260;
+    const top = 30;
+    const bottom = 230;
+    const today = dayStart(getKyivNow());
+    const count = Math.max(days.length, 1);
+    const gap = 10;
+    const columnWidth = (width - gap * (count - 1)) / count;
+    const points = days.map((day, index) => ({
+      day,
+      x: index * (columnWidth + gap) + columnWidth / 2,
+      y: bottom - Math.min(Math.max(day.workMinutes, 0) / 60, 8) / 8 * (bottom - top),
+      future: day.dayMs > today,
+    }));
+    const grid = [0, 2, 4, 6, 8].map(hours => {
+      const y = bottom - hours / 8 * (bottom - top);
+      return `<line class="work-hours-gridline" x1="0" y1="${y}" x2="${width}" y2="${y}" />`;
+    }).join('');
+    let previous = null;
+    const line = points.map(point => {
+      if (point.future) { previous = null; return ''; }
+      const command = `${previous ? 'L' : 'M'}${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+      previous = point;
+      return command;
+    }).filter(Boolean).join(' ');
+    const markers = points.filter(point => !point.future).map(({ day, x, y }) => {
+      const exceedsScale = day.workMinutes > 480;
+      const label = `${exceedsScale ? '↑ ' : ''}${formatCompact(day.workMinutes)}`;
+      const title = `${formatDayMonth(day.dayMs)}: ${formatDuration(day.workMinutes)} of alerts during 09:00–18:00${day.dayMs === today ? ' (today so far)' : ''}${exceedsScale ? '; above the 8-hour chart scale' : ''}`;
+      return `<g class="work-hours-point" tabindex="0" role="img" aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="4.5" /><text x="${x.toFixed(2)}" y="${(y - 12).toFixed(2)}" text-anchor="middle">${escapeHtml(label)}</text></g>`;
+    }).join('');
+    const dates = days.map(day => `<span>${escapeHtml(formatDayMonth(day.dayMs))}</span>`).join('');
+    return `<svg class="work-hours-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-label="Daily alert hours during 09:00–18:00">${grid}<path class="work-hours-line" d="${line}" />${markers}</svg><div class="work-hours-dates" style="grid-template-columns:repeat(${count},minmax(0,1fr))">${dates}</div>`;
   }
 
   function shiftTimelineWeek(direction) {
@@ -1565,3 +1624,4 @@ import {
   function formatDateShort(ms) { return new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',timeZone:'UTC'}).format(new Date(ms)); }
   function formatDateLong(ms) { return new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'}).format(new Date(ms)); }
 })();
+
