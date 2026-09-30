@@ -16,6 +16,15 @@ export function normalizeCollectorState(value) {
     lastSuccessAtMs: finiteNumber(raw.lastSuccessAtMs),
     consecutiveFailures: Math.max(0, Number(raw.consecutiveFailures) || 0),
     lastError: String(raw.lastError || ''),
+    historyBackfill: raw.historyBackfill && typeof raw.historyBackfill === 'object' ? clone(raw.historyBackfill) : {
+      lastAttemptAtMs: null,
+      lastSuccessAtMs: null,
+      lastError: '',
+      sourceRows: 0,
+      classifiedRows: 0,
+      recordsAdded: 0,
+      recordsRefreshed: 0,
+    },
   };
 }
 
@@ -44,6 +53,7 @@ export function advanceCollectorState(previousValue, snapshot, options = {}) {
     lastSuccessAtMs: nowMs,
     consecutiveFailures: 0,
     lastError: '',
+    historyBackfill: previous.historyBackfill,
   };
 }
 
@@ -96,6 +106,15 @@ export function buildCollectorPayload(value, options = {}) {
       lastSuccessAt: isoOrNull(state.lastSuccessAtMs),
       stale: !liveStatusKnown,
       consecutiveFailures: state.consecutiveFailures,
+      historyBackfill: {
+        lastAttemptAt: isoOrNull(state.historyBackfill.lastAttemptAtMs),
+        lastSuccessAt: isoOrNull(state.historyBackfill.lastSuccessAtMs),
+        lastError: state.historyBackfill.lastError || '',
+        sourceRows: state.historyBackfill.sourceRows || 0,
+        classifiedRows: state.historyBackfill.classifiedRows || 0,
+        recordsAdded: state.historyBackfill.recordsAdded || 0,
+        recordsRefreshed: state.historyBackfill.recordsRefreshed || 0,
+      },
     },
   };
 }
