@@ -1229,7 +1229,6 @@ import {
   }
 
   function renderTimelines() {
-    const mobileDays = state.days.slice(-state.range);
     const today = dayStart(getKyivNow());
     const currentWeekStart = isoWeekStart(today);
     const desktopStart = state.timelineWeekStartMs ?? (today - 6 * DAY);
@@ -1244,7 +1243,7 @@ import {
     els.timelineGrid.innerHTML = '';
     els.mobileTimeline.innerHTML = '';
     desktopDays.forEach(day => els.timelineGrid.appendChild(createDesktopDay(day)));
-    [...mobileDays].reverse().forEach(day => els.mobileTimeline.appendChild(createMobileDay(day)));
+    [...desktopDays].reverse().forEach(day => els.mobileTimeline.appendChild(createMobileDay(day)));
 
     const weeklyView = state.timelineWeekStartMs != null;
     els.timelineWeekLabel.textContent = weeklyView
@@ -1258,7 +1257,7 @@ import {
     els.nextWeekButton.disabled = state.timelineWeekStartMs != null && visibleWeekStart >= currentWeekStart;
     els.timelineScroll.scrollLeft = 0;
     state.workHoursDesktopDays = desktopDays;
-    state.workHoursMobileDays = [...mobileDays].reverse();
+    state.workHoursMobileDays = desktopDays;
     renderWorkHoursCharts();
   }
 

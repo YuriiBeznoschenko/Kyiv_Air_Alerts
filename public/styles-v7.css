@@ -1199,8 +1199,7 @@ body.hide-work .alert-work { background: var(--alert) !important; }
 }
 
 
-/* Desktop weekly paging: one polished control and seven columns with no horizontal scrollbar. */
-@media (min-width:761px) {
+/* Shared weekly paging on desktop and mobile. */
   .desktop-week-control {
     display:flex;
     align-items:center;
@@ -1253,6 +1252,7 @@ body.hide-work .alert-work { background: var(--alert) !important; }
     text-align:center;
     white-space:nowrap;
   }
+@media (min-width:761px) {
   .timeline-scroll { overflow:hidden; padding-bottom:0; }
   .timeline-grid {
     min-width:0;
@@ -1263,7 +1263,9 @@ body.hide-work .alert-work { background: var(--alert) !important; }
   .day-column { width:auto; min-width:0; flex:initial; }
 }
 @media (max-width:760px) {
-  .desktop-week-control { display:none; }
+  .desktop-week-control { width:100%; box-sizing:border-box; }
+  .desktop-week-control strong { flex:1; min-width:0; white-space:normal; }
+  .desktop-week-control .week-nav-button { min-height:44px; padding:0 7px; }
 }
 
 
